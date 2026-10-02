@@ -3,7 +3,7 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
-## 1.1.0 (not published yet)
+## 1.1.0 (2026-10-02)
 
 ### Added
 
