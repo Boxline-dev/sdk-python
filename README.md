@@ -1,6 +1,8 @@
 # Boxline Python SDK
 
-Cloud browsers and shell sandboxes for AI agents. Each session is an isolated machine with a real Chrome and, if you
+**Give your AI agents the infrastructure they need: browsers, shells, storage and isolated machines.**
+
+Each session is an isolated machine with a real Chrome and, if you
 ask for it, a bash shell with Python and Node, sharing one `/workspace` disk. Sync (`Boxline`) and async
 (`AsyncBoxline`) clients with the same methods.
 
