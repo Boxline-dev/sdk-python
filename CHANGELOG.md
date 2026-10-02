@@ -7,6 +7,13 @@ All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It
 
 ### Added
 
+- **Partial results from a several-page extract**: a page that did not load (`page_unreachable`, `page_timeout`) or is
+  not a web page is listed in `pages` with `status: None`, `finalUrl: None` and `error: {code, message}`, and the
+  call fails only when none load.
+- **`NotAWebPageError`** (422 `not_a_web_page`, not retried): `fetch` or `extract` of an address that answers with a
+  PDF or another document Chrome only displays.
+- **Streamed exec**: `exec_stream` skips the API's `waiting` and `ping` lines and raises an `error` line as the error
+  it names; `exec` allows up to 10 minutes of session setup (`SETUP_WAIT_S`) before the command's own time limit.
 - **Own model keys and a default model** (sync and async): `bx.project.model_keys()`, `set_model_key(provider, key=, use=)` and
   `delete_model_key(provider)` (a key is write-only: `preview` is its last 4 characters); `default_model=` on
   `project.set_settings()`; `keySource` on agent runs, extract results and `agent.models()` providers; `Provider` now also
