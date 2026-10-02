@@ -1,0 +1,576 @@
+[
+ {
+  "name": "valid",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "valid, several secrets given (the right one second)",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_not-the-secret-000000000000000000000000000",
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "wrong secret",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_not-the-secret-000000000000000000000000000"
+  ],
+  "now": 1790000000000,
+  "expect": "no_matching_signature"
+ },
+ {
+  "name": "tampered body",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"timeout\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "no_matching_signature"
+ },
+ {
+  "name": "body with a trailing newline added",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}\n",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "no_matching_signature"
+ },
+ {
+  "name": "rotation: two v1, verified with the new secret",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=2b6da481d860005143a1133a6abc2d50bfe3e2060a4c9e1f364bc06c216c5a45,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "signedWith": {
+   "secrets": [
+    "whsec_Zr8Nw2Qc5Vm1Lk9Xs4Tb7Hd0Jf3Gp6Ya2Ue5Ri8Oq1Wz",
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_Zr8Nw2Qc5Vm1Lk9Xs4Tb7Hd0Jf3Gp6Ya2Ue5Ri8Oq1Wz"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "rotation: two v1, verified with the old secret",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=2b6da481d860005143a1133a6abc2d50bfe3e2060a4c9e1f364bc06c216c5a45,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "signedWith": {
+   "secrets": [
+    "whsec_Zr8Nw2Qc5Vm1Lk9Xs4Tb7Hd0Jf3Gp6Ya2Ue5Ri8Oq1Wz",
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "rotation: two v1, neither secret",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=2b6da481d860005143a1133a6abc2d50bfe3e2060a4c9e1f364bc06c216c5a45,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "signedWith": {
+   "secrets": [
+    "whsec_Zr8Nw2Qc5Vm1Lk9Xs4Tb7Hd0Jf3Gp6Ya2Ue5Ri8Oq1Wz",
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_not-the-secret-000000000000000000000000000"
+  ],
+  "now": 1790000000000,
+  "expect": "no_matching_signature"
+ },
+ {
+  "name": "unicode body",
+  "body": "{\"id\":\"evt_unicode\",\"type\":\"webhook.test\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"message\":\"Grüße, 東京, emoji 🚀, é,  \"}}",
+  "header": "t=1790000000,v1=e2ff047c4eb2eb20c53dd3e9e83a3b98da66799eba50a5696ae75ae135bd3371",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "unicode body as bytes",
+  "body": null,
+  "bodyHex": "7b226964223a226576745f756e69636f6465222c2274797065223a22776562686f6f6b2e74657374222c22637265617465644174223a22323032362d30392d33305431303a30303a30302e3030305a222c2270726f6a6563744964223a2270726a5f31222c2264617461223a7b226d657373616765223a224772c3bcc39f652c20e69db1e4baac2c20656d6f6a6920f09f9a802c2065cc812c20e280a8227d7d",
+  "header": "t=1790000000,v1=e2ff047c4eb2eb20c53dd3e9e83a3b98da66799eba50a5696ae75ae135bd3371",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "body of several SHA-256 blocks",
+  "body": "{\"id\":\"evt_big\",\"type\":\"agent_run.finished\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"result\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}",
+  "header": "t=1790000000,v1=24619abfbe229979fcf65b2e71e2e3ec1776a13e2fb20b2348a0b7c81f7b1e37",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "a secret longer than the HMAC block",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=1c1d98fd6c775f9504e18f2bb7de88f9e28618c1d275e3798cbdcc87d65846f8",
+  "signedWith": {
+   "secrets": [
+    "whsec_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "bytes that are not UTF-8",
+  "body": null,
+  "bodyHex": "7bfffe227d",
+  "header": "t=1790000000,v1=57cff0e84f3c5eebc09110076229d92dccee98d0b39e99088ba2669790cc60ed",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "empty body",
+  "body": "",
+  "header": "t=1790000000,v1=812186771e7b82186179bde41bab7c396f4abc14e99180961d738bb9e587bfb5",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000000
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "timestamp 300 s old (the edge)",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1789999700,v1=f8e302647b72ca31cace9349dd19c6c00322a1ff681193043d5e5e7b9adea816",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1789999700
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "timestamp 301 s old",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1789999699,v1=45cf234f12e7c9e6ac7996a9f2572b6e45d940dab08b71705585a1b5c2c8b72f",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1789999699
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "timestamp_out_of_range"
+ },
+ {
+  "name": "timestamp 300 s ahead",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000300,v1=a779391d506592f7a4cae3e073594bc64e18d4307f195a2697a95a4d31916314",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000300
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "timestamp 301 s ahead",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000301,v1=ee7d98df1097de88c1331bb6fdb8fb8a15f57a10fb541e3fb1c5f4134337f80d",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1790000301
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "timestamp_out_of_range"
+ },
+ {
+  "name": "a 10 s tolerance, 11 s old",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1789999989,v1=f7811c4eb4c3dfbf393a0002b48fb0a499308599bbf4bd17006778c521ffab03",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1789999989
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "toleranceSeconds": 10,
+  "expect": "timestamp_out_of_range"
+ },
+ {
+  "name": "a 10 s tolerance, 10 s old",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1789999990,v1=f109d32a49c4854de86b1630fdecd57f3065f6379bb0db9d1f8e6e5cbb94613b",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1789999990
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "toleranceSeconds": 10,
+  "expect": "ok"
+ },
+ {
+  "name": "the clock with milliseconds (floored)",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1789999700,v1=f8e302647b72ca31cace9349dd19c6c00322a1ff681193043d5e5e7b9adea816",
+  "signedWith": {
+   "secrets": [
+    "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+   ],
+   "timestamp": 1789999700
+  },
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000999,
+  "expect": "ok"
+ },
+ {
+  "name": "no header",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": null,
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "empty header",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "no v1",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "no t",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "t is not a number",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=abc,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "t with 13 digits",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1111111111111,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "t in Arabic-Indic digits",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=١٧٩٠٠٠٠٠٠٠,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "v1 in upper case (not accepted)",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=D7BE3893EE7AD825678CC3E4F8EDA136FE331D059E2061C5076F44D9E8118C66",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "v1 too short",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c6",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "a good v1 after a bad one",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=0000000000000000000000000000000000000000000000000000000000000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "other schemes ignored",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v0=abc,v2=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "spaces around keys and values",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": " t = 1790000000 , v1 = d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66 ",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "tabs and newlines around",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "\tt=1790000000\n,\r\nv1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66\t",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "no-break space and BOM are trimmed (like JS trim)",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": " t=1790000000﻿,　v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66 ",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "NEL is not trimmed (JS trim keeps it)",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "a key starting with =",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "=t=1790000000,t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "the last t wins",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1789999000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66,t=1790000000",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "the last t wins (stale)",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66,t=1789999000",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "timestamp_out_of_range"
+ },
+ {
+  "name": "empty parts",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": ",,t=1790000000,,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66,",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "a header of 4096 characters",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66,x=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "a header of 4097 characters",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66,x=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ },
+ {
+  "name": "4096 UTF-16 units of emoji",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66,x=a😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "ok"
+ },
+ {
+  "name": "4098 UTF-16 units of emoji",
+  "body": "{\"id\":\"evt_Q2x9L0aPz7NmK3Jb\",\"type\":\"session.ended\",\"createdAt\":\"2026-09-30T10:00:00.000Z\",\"projectId\":\"prj_1\",\"data\":{\"id\":\"6c1f\",\"status\":\"COMPLETED\",\"endReason\":\"released\"}}",
+  "header": "t=1790000000,v1=d7be3893ee7ad825678cc3e4f8eda136fe331d059e2061c5076f44d9e8118c66,x=a😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+  "secrets": [
+   "whsec_4mE9qV1xZt7bR2kLp0sWc8yHn3dJf6aGuQeTiOvXyB0"
+  ],
+  "now": 1790000000000,
+  "expect": "malformed"
+ }
+]
