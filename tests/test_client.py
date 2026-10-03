@@ -46,10 +46,10 @@ def test_headers_api_key_version_and_json_only_with_a_body() -> None:
     bx = f.sync()
     assert bx.base_url == "http://api.test"
     bx.health()
-    bx.contexts.rename("ctx_1", "n")
+    bx.profiles.update("prof_1", name="n")
     get, patch = f.requests
     assert get.headers["x-api-key"] == "bxl_test"
-    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/1.1.0"
+    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/1.2.0"
     assert "content-type" not in get.headers
     assert get.url.path == "/healthz"
     assert patch.headers["content-type"] == "application/json"
@@ -164,7 +164,7 @@ def test_keys_on_exactly_the_create_routes() -> None:
     bx.agent.send_message("run_1", "hi")
     bx.crawl.start("https://example.com")
     bx.api_keys.create("k")
-    bx.contexts.create("c")
+    bx.profiles.create("c")
     bx.extensions.upload(b"\x01")
     bx.tasks.create("n", "i")
     bx.tasks.run("task_1")
@@ -182,7 +182,7 @@ def test_keys_on_exactly_the_create_routes() -> None:
         "/v1/agent/runs/run_1/messages",
         "/v1/crawl",
         "/v1/api-keys",
-        "/v1/contexts",
+        "/v1/profiles",
         "/v1/extensions",
         "/v1/tasks",
         "/v1/tasks/task_1/runs",
@@ -367,7 +367,7 @@ def test_list_returns_the_first_page_and_iterates_every_item() -> None:
 
 def test_list_from_a_cursor_and_invalid_cursor() -> None:
     f = Fake(pages)
-    assert [c["id"] for c in f.sync().contexts.list(after="c3")] == ["3-1", "3-2"]
+    assert [c["id"] for c in f.sync().profiles.list(after="c3")] == ["3-1", "3-2"]
     g = Fake(api_error(400, "invalid_cursor"))
     with pytest.raises(boxline.InvalidCursorError):
         g.sync().crawl.list(after="nope")
@@ -503,7 +503,7 @@ def test_async_retries_keys_and_errors(no_sleep: List[float]) -> None:
             assert isinstance(s, boxline.AsyncSession) and s.id == SESSION_ID
             keys = {r.headers["idempotency-key"] for r in f.requests}
             assert len(f.requests) == 3 and len(keys) == 1
-            assert f.requests[0].headers["boxline-sdk"] == "python/1.1.0"
+            assert f.requests[0].headers["boxline-sdk"] == "python/1.2.0"
         g = Fake(api_error(404, "not_found", {"x-client-request-id": "c1"}, "req_1"))
         with pytest.raises(boxline.NotFoundError) as e:
             await g.async_().sessions.get("x", options={"client_request_id": "c1"})
@@ -555,7 +555,7 @@ def test_sync_and_async_have_the_same_surface() -> None:
         (boxline.SessionFiles, boxline.AsyncSessionFiles),
         (boxline.Session, boxline.AsyncSession),
         (boxline.Files, boxline.AsyncFiles),
-        (boxline.Contexts, boxline.AsyncContexts),
+        (boxline.Profiles, boxline.AsyncProfiles),
         (boxline.Crawl, boxline.AsyncCrawl),
         (boxline.Agent, boxline.AsyncAgent),
         (boxline.ApiKeys, boxline.AsyncApiKeys),

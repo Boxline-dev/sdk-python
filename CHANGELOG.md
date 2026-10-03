@@ -3,6 +3,63 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
+## 1.2.0 (unreleased)
+
+### Added
+
+- **Credentials**: `bx.credentials.list/create/get/update/delete/audit` (sync and async; `/v1/credentials`), one place
+  for what the AI types and the shell uses, with a typed union per type: a **password** (`origins`, `username`,
+  `password`, optional `totp_secret`; `types.PasswordCredential` with `username` and `hasTotp`) and a **secret**
+  (`value`, optional `origins`; `types.SecretCredential` with `preview`). `credentials.create(name, "password", ...)` and
+  `credentials.create(name, "secret", ...)` are typed per type; `scope`, `shell`, `description` and the write-only
+  rules are as for secrets. Types `Credential`, `CredentialType`, `CredentialScope`, `CredentialField`,
+  `CredentialAuditEntry` (with `type`, and the new `usedBy` kinds `action` and `otp`) and `CredentialUse`. Passwords need
+  the plan's `loginDetails`; the plan's limit is `maxCredentials`.
+- `credentials.update` that makes an AI-only credential readable by shells (`scope` to `"shell"` or `"all"`, or
+  `shell=True`) needs the values again in the same call, like a new site (the API answers 400 `invalid_request`
+  otherwise, 409 `conflict` when the sites, scope or `shell` changed meanwhile).
+- **`credentials=["NAME"]`** where the API takes them: `sessions.create` (exported into the shell: a secret as `$NAME`,
+  a password as `$NAME_USERNAME` and `$NAME_PASSWORD`; `boxline-otp NAME` prints its 2FA code), `exec` and `exec_stream`,
+  `agent.run`, `session.step()` and the step action (placeholders `%NAME%`, `%NAME.username%`, `%NAME.password%`,
+  `%NAME.otp%`), `run_script`, and `tasks.create` / `tasks.update` (a task shows its `credentials`). A `Session` lists
+  the exported `credentials`.
+- **`session.type_credential(name, field, selector, allow_with_extensions)`** and the `type` action with `credential`
+  (and `field`: `"username"`, `"password"` or `"otp"`): a credential's value typed into a field without passing
+  through your code, only on the credential's sites.
+- **`profiles.update(profile_id, name=None, credential=...)`**: rename a profile and/or link the password credential it
+  signs in with (`credential=None` unlinks it). A `Profile` has `credential`; sessions with the profile, and the agent
+  runs, task runs and steps in them, get that credential as if it were listed.
+- Errors `CredentialExistsError` (409 `credential_exists`), `CredentialNotAllowedError` (400 `credential_not_for_ai` /
+  `credential_not_for_shell`), `TooManyCredentialValuesError` (409 `too_many_credential_values`) and
+  `ErrorCode.CREDENTIAL_NOT_FOUND` (404 `credential_not_found`, a `NotFoundError`). The webhook event
+  `credential.changed` (`WebhookCredentialChangedData`: `name`, `action`, `type`, `by`, `changed`).
+- `examples/credentials.py`.
+
+### Changed (breaking)
+
+Nothing above shipped before, so these old names are gone with no aliases.
+
+- **Secrets and profile login details became credentials.** `bx.secrets` is `bx.credentials` (`Secrets` and
+  `AsyncSecrets` are `Credentials` and `AsyncCredentials`); `secrets=` on `sessions.create`, `exec`, `exec_stream`,
+  `agent.run`, `step`, `run_script` and `tasks.create` / `tasks.update` is `credentials=` (`Session.secrets` is
+  `Session.credentials`, `Task.secrets` is `Task.credentials`); `login=True` on `run_script` is gone (list the
+  credential); `profiles.set_login`, `update_login` and `delete_login`, `Profile.login`, `ProfileLogin` and the
+  placeholders `%login.username%`, `%login.password%` and `%login.otp%` are gone: create a password credential and link
+  it with `profiles.update(id, credential=...)`. `credentials.create` takes `(name, type, ...)` with keyword arguments
+  per type. `types.Secret`, `SecretScope`, `SecretUse` and `SecretAuditEntry` are replaced by the credential types above;
+  `SecretExistsError`, `SecretNotAllowedError` and `TooManySecretValuesError` by `CredentialExistsError`,
+  `CredentialNotAllowedError` and `TooManyCredentialValuesError`; the plan field `maxSecrets` is `maxCredentials`; the
+  webhook event `secret.changed` is `credential.changed`.
+- **Saved logins (contexts) are now browser profiles.** `bx.contexts` is `bx.profiles` (`create`, `get`, `list`,
+  `update`, `delete`; sync and async; the routes are `/v1/profiles`; `contexts.rename` is `profiles.update(id, name=...)`).
+  `sessions.create` and `agent.run` take `profile=` (and `persist_profile=` on `sessions.create`) instead of
+  `context=` and `persist_context=`; `tasks.create` and `tasks.update` take `profile=` instead of `saved_login=`; the
+  methods' first argument is `profile_id`. A `Session` has `profileId` and `profilePersist` instead of `contextId`
+  and `contextPersist`; the plan fields are `maxProfiles` and `maxProfileBytes`, the plan feature is `profiles`, and
+  the error code is `ErrorCode.PROFILE_TOO_LARGE` (`profile_too_large`). Types: `types.Profile` (was `Context`) and
+  `TaskProfile`; the classes `Contexts` and `AsyncContexts` are `Profiles` and `AsyncProfiles`. New profiles have ids
+  starting with `prof_`. The old names are gone.
+
 ## 1.1.0 (2026-10-02)
 
 ### Added

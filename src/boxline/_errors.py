@@ -42,10 +42,11 @@ class ErrorCode:
     LIMIT_REACHED = "limit_reached"
     MISSING_VARIABLES = "missing_variables"
     PLAN_LIMIT = "plan_limit"
-    TOO_MANY_SECRET_VALUES = "too_many_secret_values"
-    SECRET_EXISTS = "secret_exists"
-    SECRET_NOT_FOR_AI = "secret_not_for_ai"
-    SECRET_NOT_FOR_SHELL = "secret_not_for_shell"
+    TOO_MANY_CREDENTIAL_VALUES = "too_many_credential_values"
+    CREDENTIAL_EXISTS = "credential_exists"
+    CREDENTIAL_NOT_FOUND = "credential_not_found"
+    CREDENTIAL_NOT_FOR_AI = "credential_not_for_ai"
+    CREDENTIAL_NOT_FOR_SHELL = "credential_not_for_shell"
     MACHINE_TOO_OLD = "machine_too_old"
     #: An agent or task run's errorCode (never an HTTP error): the answer did not match the run's output schema after
     #: the repair try (the run's ``error`` lists the problems).
@@ -75,8 +76,8 @@ class ErrorCode:
     MODEL_KEY_REJECTED = "model_key_rejected"
     #: 502: another failure of a call on the project's own model key (the provider's text, key scrubbed).
     MODEL_ERROR = "model_error"
-    #: 413: ``contexts.create(from_session=…)`` when the session's cookies and site storage exceed 16 MB.
-    CONTEXT_TOO_LARGE = "context_too_large"
+    #: 413: ``profiles.create(from_session=…)`` when the session's cookies and site storage exceed 16 MB.
+    PROFILE_TOO_LARGE = "profile_too_large"
     #: 409: the session has ended (e.g. an agent run started or continued in it).
     SESSION_NOT_RUNNING = "session_not_running"
     UNAUTHORIZED = "unauthorized"
@@ -242,26 +243,28 @@ class MissingVariablesError(BoxlineError):
 
 class PlanLimitError(BoxlineError):
     """``plan_limit``: the plan allows no more of this (402: tasks, schedules switched on, searches on Free, project
-    secrets beyond ``maxSecrets``, a session longer than the plan allows); the message says the limit."""
+    credentials beyond ``maxCredentials``, a session longer than the plan allows); the message says the limit."""
 
 
-class TooManySecretValuesError(BoxlineError):
-    """409 ``too_many_secret_values``: the session already hides as many earlier secret values in its output as it can
-    (256 values or 256 KB); a session create, exec, agent run or step adding more is refused. Start a new session."""
+class TooManyCredentialValuesError(BoxlineError):
+    """409 ``too_many_credential_values``: the session already hides as many earlier credential values in its output as
+    it can (256 values or 256 KB); a session create, exec, agent run or step adding more is refused. Start a new
+    session."""
 
 
-class SecretExistsError(BoxlineError):
-    """409 ``secret_exists``: the project has a secret with that name; change it with ``secrets.update``."""
+class CredentialExistsError(BoxlineError):
+    """409 ``credential_exists``: the project has a credential with that name; change it with ``credentials.update``."""
 
 
-class SecretNotAllowedError(BoxlineError):
-    """400 ``secret_not_for_ai`` / ``secret_not_for_shell``: the secret's scope does not allow this use (scope "shell" is
-    not for the AI; a secret goes into a shell only with scope "shell" or "all", or ``shell: True``)."""
+class CredentialNotAllowedError(BoxlineError):
+    """400 ``credential_not_for_ai`` / ``credential_not_for_shell``: the credential's scope does not allow this use
+    (scope "shell" is not for the AI; a credential goes into a shell only with scope "shell" or "all", or
+    ``shell: True``)."""
 
 
 class MachineTooOldError(BoxlineError):
     """409 ``machine_too_old``: the session's machine comes from an image older than the API (during a deploy) and cannot
-    take ``env`` or ``secrets``; start a new session."""
+    take ``env`` or ``credentials``; start a new session."""
 
 
 class NotContinuableError(BoxlineError):
@@ -350,10 +353,10 @@ _BY_CODE: Dict[str, Type[BoxlineError]] = {
     ErrorCode.LIMIT_REACHED: LimitReachedError,
     ErrorCode.MISSING_VARIABLES: MissingVariablesError,
     ErrorCode.PLAN_LIMIT: PlanLimitError,
-    ErrorCode.TOO_MANY_SECRET_VALUES: TooManySecretValuesError,
-    ErrorCode.SECRET_EXISTS: SecretExistsError,
-    ErrorCode.SECRET_NOT_FOR_AI: SecretNotAllowedError,
-    ErrorCode.SECRET_NOT_FOR_SHELL: SecretNotAllowedError,
+    ErrorCode.TOO_MANY_CREDENTIAL_VALUES: TooManyCredentialValuesError,
+    ErrorCode.CREDENTIAL_EXISTS: CredentialExistsError,
+    ErrorCode.CREDENTIAL_NOT_FOR_AI: CredentialNotAllowedError,
+    ErrorCode.CREDENTIAL_NOT_FOR_SHELL: CredentialNotAllowedError,
     ErrorCode.MACHINE_TOO_OLD: MachineTooOldError,
     ErrorCode.NOT_CONTINUABLE: NotContinuableError,
     ErrorCode.TOO_MANY_MESSAGES: TooManyMessagesError,

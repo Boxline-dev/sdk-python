@@ -20,10 +20,10 @@ TASK: Dict[str, Any] = {
     "name": "Books",
     "instruction": "Open https://books.toscrape.com and list the books in %category%",
     "variables": [{"name": "category", "default": "Travel"}],
-    "secrets": ["SHOP_PASSWORD"],
+    "credentials": ["SHOP"],
     "output": {"type": "object", "properties": {"books": {"type": "array"}}, "required": ["books"]},
     "browser": None,
-    "savedLogin": None,
+    "profile": None,
     "model": None,
     "maxSteps": None,
     "notifyOnFailure": None,
@@ -93,18 +93,18 @@ def test_methods_send_the_requests_the_api_expects() -> None:
                     variables=[{"name": "category", "default": "Travel"}, {"name": "password", "secret": True, "origins": ["https://example.com"]}],
                     output=TASK["output"],
                     browser={"blockAds": True, "cookieBanners": "reject", "locale": "en-GB"},
-                    saved_login={"id": "ctx_1", "persist": False},
+                    profile={"id": "prof_1", "persist": False},
                     model={"provider": "anthropic", "model": "claude-haiku-4-5"},
                     max_steps=10,
                     schedule={"cron": "0 9 * * MON-FRI", "timezone": "Europe/London"},
-                    secrets=("SHOP_PASSWORD",),
+                    credentials=("SHOP",),
                 )
             )
             assert created["schedule"]["nextRunAt"] == TASK["schedule"]["nextRunAt"]
             assert (await aw(bx.tasks.list(limit=5))).data == [TASK]
             await aw(bx.tasks.get("task/1"))
-            await aw(bx.tasks.update("task_1", schedule={"enabled": False}, output=None, max_steps=None, secrets=None))
-            await aw(bx.tasks.update("task_1", variables=[], secrets=["SHOP_PASSWORD"]))
+            await aw(bx.tasks.update("task_1", schedule={"enabled": False}, output=None, max_steps=None, credentials=None))
+            await aw(bx.tasks.update("task_1", variables=[], credentials=["SHOP"]))
             await aw(bx.tasks.delete("task_1"))
             started = await aw(bx.tasks.run("task_1", variables={"category": "Poetry", "pages": 2}))
             assert started["status"] == "running"
@@ -140,13 +140,13 @@ def test_methods_send_the_requests_the_api_expects() -> None:
             "GET /v1/tasks/task_1/runs?status=queued",
         ], flavour
         body = f.body(0)
-        assert body["name"] == "Books" and body["output"] == TASK["output"] and body["savedLogin"] == {"id": "ctx_1", "persist": False}
+        assert body["name"] == "Books" and body["output"] == TASK["output"] and body["profile"] == {"id": "prof_1", "persist": False}
         assert body["maxSteps"] == 10 and body["browser"] == {"blockAds": True, "cookieBanners": "reject", "locale": "en-GB"}
         assert body["variables"][1] == {"name": "password", "secret": True, "origins": ["https://example.com"]}
-        assert "notifyOnFailure" not in body and body["secrets"] == ["SHOP_PASSWORD"]
+        assert "notifyOnFailure" not in body and body["credentials"] == ["SHOP"]
         # None removes a field: it reaches the API as null; fields not passed are left out.
-        assert f.body(3) == {"schedule": {"enabled": False}, "output": None, "maxSteps": None, "secrets": None}
-        assert f.body(4) == {"variables": [], "secrets": ["SHOP_PASSWORD"]}
+        assert f.body(3) == {"schedule": {"enabled": False}, "output": None, "maxSteps": None, "credentials": None}
+        assert f.body(4) == {"variables": [], "credentials": ["SHOP"]}
         assert f.body(6) == {"variables": {"category": "Poetry", "pages": 2}}
         assert f.body(7) == {}
         keys = [r.headers.get("idempotency-key") for r in f.requests]

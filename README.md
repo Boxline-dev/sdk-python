@@ -26,7 +26,7 @@ Python 3.9 or newer. Responses are plain dicts with the API's camelCase keys, ty
 - [An agent run with variables](#an-agent-run-with-variables)
 - [Limits, Continue and messages](#limits-continue-and-messages)
 - [Tasks and structured output](#tasks-and-structured-output)
-- [Secrets and saved login details](#secrets-and-saved-login-details)
+- [Credentials and browser profiles](#credentials-and-browser-profiles)
 - [A script with useModel](#a-script-with-usemodel)
 - [CAPTCHAs](#captchas)
 - [Browser settings and extensions](#browser-settings-and-extensions)
@@ -205,7 +205,7 @@ bx.agent.send_message(run["id"], "Also open page C and include its heading in th
 
 ## Tasks and structured output
 
-A task is a saved agent run: an instruction with `%name%` variables, an output schema, browser settings, a saved login,
+A task is a saved agent run: an instruction with `%name%` variables, an output schema, browser settings, a profile,
 a model and, if you like, a schedule. Run it by hand or on its schedule; every run is an agent run.
 
 ```python
@@ -239,46 +239,68 @@ bx.tasks.update(task["id"], schedule={"enabled": True})   # None removes a field
 - **Variables**: plain ones are written into the instruction (and kept with the run); `{"name", "secret": True,
   "origins"}` is never stored, must come with every run, and is typed without the model seeing it. A task with a
   secret variable cannot have a schedule. A run missing a value raises `MissingVariablesError`.
+- **Credentials**: `credentials=["SHOP"]` on `tasks.create` gives every run the saved credentials' placeholders (see
+  [Credentials and browser profiles](#credentials-and-browser-profiles)); a scheduled task may use them, and the task
+  keeps the names only.
 - **Schedules**: five-field cron (at most every 5 minutes) read in `timezone`. A scheduled run is `queued` until it
   starts; a time that comes while a run is still going is `skipped`, and times the platform was down for are `missed`
   (`reason`, `missedCount`). The plan limits tasks and schedules switched on (`PlanLimitError`).
 - `wait_for_run` takes the run from `run()` or `(task_id, task_run_id)`, with `poll=` and `timeout=` in seconds; there
   is no GET for one task run, so it watches the task's unfinished runs. `AsyncBoxline` has the same methods.
 
-## Secrets and saved login details
+## Credentials and browser profiles
 
-Project secrets are write-only: the value is sealed when stored and never returned or shown. Each secret's `scope` says
-where it may be used: `"agent"` (the default: only the AI, as `%NAME%`), `"shell"` (only as `$NAME` in shells) or `"all"`.
+Credentials are write-only: the value is sealed when stored and never returned or shown. There are two types, a website
+**password** (sites, user name, password and an optional 2FA key) and a **secret** (one value, such as an API token).
+The name is the handle: the AI's placeholder (`%GITHUB_TOKEN%`, `%SHOP.password%`) and the shell variable
+(`$GITHUB_TOKEN`, `$SHOP_PASSWORD`). Each credential's `scope` says where it may be used: `"agent"` (the default: only
+the AI), `"shell"` (only as variables in shells) or `"all"`.
 
 ```python
-bx.secrets.create("GITHUB_TOKEN", os.environ["GITHUB_TOKEN"], scope="shell")
-bx.secrets.create("SITE_PASSWORD", os.environ["SITE_PASSWORD"], origins=["https://example.com"])
+bx.credentials.create("GITHUB_TOKEN", "secret", value=os.environ["GITHUB_TOKEN"], scope="shell")
+shop = bx.credentials.create(
+    "SHOP",
+    "password",
+    origins=["https://shop.example.com"],          # the only site the AI may type it on
+    username="ops@example.com",
+    password=os.environ["SHOP_PASSWORD"],
+    totp_secret=os.environ.get("SHOP_2FA_KEY"),    # optional: %SHOP.otp% is the current code
+)
+print(shop["type"], shop["username"], shop["hasTotp"])  # no value anywhere
 
-# In a shell: exported as $GITHUB_TOKEN, and shown as %GITHUB_TOKEN% wherever it appears in the output.
-s = bx.sessions.create(shell=True, env={"REGION": "eu"}, secrets=["GITHUB_TOKEN"])
+# In a shell: $GITHUB_TOKEN, shown as %GITHUB_TOKEN% wherever it appears in the output.
+s = bx.sessions.create(shell=True, env={"REGION": "eu"}, credentials=["GITHUB_TOKEN"])
 s.exec("gh repo list --limit 3")
-s.exec("./deploy.sh", secrets=["DEPLOY_KEY"])                 # this one command only
+s.exec("./deploy.sh", credentials=["DEPLOY_KEY"])             # this one command only
 
-# For the AI: typed as %SITE_PASSWORD% only on its sites, never shown to the model.
-s.step("type %SITE_PASSWORD% into the password field", secrets=["SITE_PASSWORD"])
-bx.agent.run("Sign in to https://example.com with %SITE_PASSWORD%", secrets=["SITE_PASSWORD"])
+# For the AI: typed only on the credential's sites, never shown to the model.
+s.step("sign in with %SHOP.username% and %SHOP.password%", credentials=["SHOP"])
+bx.agent.run("Sign in to https://shop.example.com with %SHOP.username% and %SHOP.password%", credentials=["SHOP"])
+# Or type one field yourself without seeing it (the field's own frame must be on one of the credential's sites):
+s.type_credential("SHOP", "password", "#password")
 
-# A saved login's details with 2FA: %login.username%, %login.password% and %login.otp% in sessions started with it.
-bx.contexts.set_login(context["id"], "https://example.com", "ada@example.com", password, totp_secret=setup_key)
+# A profile keeps cookies; link a password and the AI can sign in again when they expire.
+bx.profiles.update(profile["id"], credential="SHOP")
 
-for e in bx.secrets.audit(name="GITHUB_TOKEN"):
+for e in bx.credentials.audit(name="SHOP"):
     print(e["at"], e["action"], e.get("actor"), (e.get("usedBy") or {}).get("type"))
 ```
 
-- **Exported secrets can be read by anything that runs in the shell**, including an agent's commands that a web page
-  tries to steer. Export only what you accept that for; keep passwords at scope `"agent"` with `origins`. Hiding
-  values in output is a guard against accidents, not a boundary.
-- `run_script(code, secrets=[...], login=True)` lets the script's `step()` calls use secrets and the saved login's
-  details (the values never enter the machine). In a session with Chrome extensions, steps and scripts with secrets
-  need `allow_with_extensions=True`, as agent runs with variables do.
-- Errors: `SecretExistsError` (use `update`), `SecretNotAllowedError` (the scope does not allow that use),
-  `TooManySecretValuesError` (the session hides as many values as it can: start a new one), `MachineTooOldError`
-  (during a deploy), `PlanLimitError` (beyond the plan's `maxSecrets`).
+- **Exported credentials can be read by anything that runs in the shell**, including an agent's commands that a web
+  page tries to steer. Export only what you accept that for; keep website passwords at scope `"agent"` with `origins`.
+  Hiding values in output is a guard against accidents, not a boundary. A 2FA key never enters the machine:
+  `boxline-otp SHOP` in the shell asks the platform for the current code.
+- `credentials.update(name, ...)` changes the fields you pass; a new site needs the sensitive values again in the same
+  call.
+- `run_script(code, credentials=[...])` lets the script's `step()` calls use credentials (the values never enter the
+  machine). In a session with Chrome extensions, steps, scripts and `type_credential` need
+  `allow_with_extensions=True`, as agent runs with variables do.
+- Errors: `CredentialExistsError` (use `update`), `CredentialNotAllowedError` (the scope does not allow that use),
+  `NotFoundError` (`credential_not_found`), `TooManyCredentialValuesError` (the session hides as many values as it can:
+  start a new one), `FeatureNotInPlanError` (a password needs the plan's `loginDetails`), `MachineTooOldError` (during
+  a deploy), `PlanLimitError` (beyond the plan's `maxCredentials`).
+- The `credential.changed` webhook event says a credential was created, changed (or linked to a profile) or deleted,
+  never a value.
 
 ## A script with useModel
 
@@ -426,8 +448,8 @@ for p in page.iter_pages():
 ```
 
 With `AsyncBoxline`, `await bx.sessions.list()` is the first page and `async for s in bx.sessions.list()` goes through
-all of them. Lists: `sessions.list`, `sessions.events`, `sessions.pages`, `contexts.list`, `api_keys.list`,
-`agent.list`, `crawl.list`, `extensions.list`, `tasks.list`, `tasks.runs`, `secrets.list`, `secrets.audit`, and a crawl's pages (`crawl.get(id, after=…)`,
+all of them. Lists: `sessions.list`, `sessions.events`, `sessions.pages`, `profiles.list`, `api_keys.list`,
+`agent.list`, `crawl.list`, `extensions.list`, `tasks.list`, `tasks.runs`, `credentials.list`, `credentials.audit`, and a crawl's pages (`crawl.get(id, after=…)`,
 or `for p in bx.crawl.pages(id)`).
 
 ## Errors, retries and time limits
@@ -440,13 +462,13 @@ or `for p in bx.crawl.pages(id)`).
   `OutOfViewportError`, `WebhookUrlNotAllowedError`, `WebhooksUnavailableError`, `WebhookDisabledError`,
   `PayloadExpiredError`, `WebhookSignatureError` (from verify_webhook), `VariablesWithExtensionsError`,
   `InvalidExtensionError`, `PayloadTooLargeError`, `LimitReachedError`, `ExtensionDeniedError`, `CrossSiteRequestError`,
-  `MissingVariablesError`, `PlanLimitError`, `SecretExistsError`, `SecretNotAllowedError`, `TooManySecretValuesError`,
+  `MissingVariablesError`, `PlanLimitError`, `CredentialExistsError`, `CredentialNotAllowedError`, `TooManyCredentialValuesError`,
   `MachineTooOldError`, `NotContinuableError`, `TooManyMessagesError`, `SessionNotRunningError`, `AuthenticationError`,
   `NotFoundError`, and
   `BoxlineConnectionError` /
   `BoxlineTimeoutError` when no answer came back. `ErrorCode` has the codes.
 - **Retries.** GETs, and the calls that create or start something (sessions, bulk, agent runs, continued runs, messages
-  to runs, crawls, API keys, contexts, extension uploads, tasks, task runs), are retried after a network error, a time-out, 429 and 5xx: 2 retries by default, exponential backoff
+  to runs, crawls, API keys, profiles, extension uploads, tasks, task runs), are retried after a network error, a time-out, 429 and 5xx: 2 retries by default, exponential backoff
   from 0.5 s to 8 s with jitter, or what `Retry-After` / `RateLimit-Reset` say (up to 60 s; longer waits go to you as a
   `RateLimitError`). Other POSTs (exec, actions, fetch…) are never retried: they could run twice.
 - **Idempotency keys.** The SDK sends a new `Idempotency-Key` with every create, and the same one on its retries, so a
@@ -475,12 +497,12 @@ methods without it (`session.pause()`).
 | Account | `me`, `has_feature`, `auth.signup`, `auth.login`, `auth.logout`, `project.trajectories`, `project.set_trajectories`, `project.settings`, `project.set_settings`, `api_keys.list`, `api_keys.create`, `api_keys.revoke` |
 | Webhooks | `webhooks.create`, `list`, `get`, `update`, `delete`, `rotate_secret`, `test`, `deliveries`, `retry_delivery`; `verify_webhook` (no request) |
 | Sessions | `sessions.create`, `get`, `list`, `update`, `release`, `pause`, `resume`, `move`, `extend`, `rotate_proxy`, `rotate_urls`, `live`, `bulk` |
-| Browser | `sessions.actions`, `sessions.computer`; on a session: `goto`, `click`, `hover`, `fill`, `type`, `press`, `scroll`, `wait`, `select`, `elements`, `evaluate`, `content`, `screenshot`, `cursor`, `upload`, `tabs`, `new_tab`, `switch_tab`, `close_tab`, `back`, `forward`, `reload`, `step`, `extract`, `export_cookies`, `computer`, `mouse.move`/`move_by`/`click`/`down`/`up`/`drag`, `keyboard.key`/`type`/`press` |
+| Browser | `sessions.actions`, `sessions.computer`; on a session: `goto`, `click`, `hover`, `fill`, `type`, `type_credential`, `press`, `scroll`, `wait`, `select`, `elements`, `evaluate`, `content`, `screenshot`, `cursor`, `upload`, `tabs`, `new_tab`, `switch_tab`, `close_tab`, `back`, `forward`, `reload`, `step`, `extract`, `export_cookies`, `computer`, `mouse.move`/`move_by`/`click`/`down`/`up`/`drag`, `keyboard.key`/`type`/`press` |
 | Shell and scripts | `sessions.exec`, `exec_stream`, `run_script`, `restart_shell` |
 | Files | `sessions.files.list`, `read`, `read_text`, `write`, `delete`, `wait_for` |
 | Logs | `sessions.events`, `stream_events`, `pages`, `recording`, `recording_frame`; on a session: `wait_for_human` |
-| Saved logins | `contexts.create`, `get`, `list`, `rename`, `delete`, `set_login`, `delete_login` |
-| Secrets | `secrets.create`, `list`, `get`, `update`, `delete`, `audit` |
+| Browser profiles | `profiles.create`, `get`, `list`, `update`, `delete` |
+| Credentials | `credentials.create`, `list`, `get`, `update`, `delete`, `audit`; on a session: `type_credential` |
 | Extensions | `extensions.upload`, `list`, `get`, `delete` |
 | Web | `fetch`, `screenshot`, `pdf`, `extract`, `search`, `crawl.start`, `get`, `list`, `cancel`, `pages`, `wait` |
 | Agent | `agent.models`, `run`, `get`, `list`, `takeover`, `hand_back`, `cancel`, `continue_run`, `send_message`, `stream`, `wait` |
@@ -507,7 +529,7 @@ reach, so run them with `BOXLINE_API_URL=http://localhost:8080`; `search.py` and
 | `webhooks.py` | endpoints, deliveries and their history, re-sending, rotating the secret, a test event |
 | `agent_variables.py` | an agent run with `%email%` / `%password%` limited to one site |
 | `tasks.py` | a task with an output schema on a demo shop: run with a variable, waited for, its history, changed, deleted; an agent run with `output` |
-| `secrets.py` | a secret exported into a shell (its length checked, its value hidden in output), changed, audited, deleted; login details on a saved login |
+| `credentials.py` | a secret exported into a shell (its length checked, its value hidden in output), changed, audited, deleted; a password with 2FA linked to a profile |
 | `script_use_model.py` | `useModel`, `step()` and `extract()` in a script |
 | `captcha.py` | noticing a CAPTCHA and handing it to a person |
 | `block_ads.py` | a session that blocks ads and trackers, and its `blocked_requests` count |

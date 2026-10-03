@@ -38,7 +38,7 @@ IDEMPOTENT_POSTS = frozenset(
         "/v1/agent/runs/:id/messages",
         "/v1/crawl",
         "/v1/api-keys",
-        "/v1/contexts",
+        "/v1/profiles",
         "/v1/extensions",
         "/v1/tasks",
         "/v1/tasks/:id/runs",

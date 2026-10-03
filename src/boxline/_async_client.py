@@ -13,7 +13,9 @@ import asyncio
 import base64
 import os
 import time
-from typing import Any, AsyncIterator, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any, AsyncIterator, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypeVar, Union, overload
+
+from typing_extensions import Literal
 
 import httpx
 
@@ -47,7 +49,7 @@ SETUP_WAIT_S = 600
 T = TypeVar("T")
 
 #: HTTP status an action result's code stands for, when one action of a list fails (the call itself answered 200).
-_ACTION_STATUS = {"captcha_timeout": 409, "model_refused": 422}
+_ACTION_STATUS = {"captcha_timeout": 409, "model_refused": 422, "credential_not_found": 404, "feature_not_in_plan": 402}
 
 #: One action: a dict (``{"action": "goto", "url": …}``) or a bare string, which is a plain-English step.
 ActionItem = Union[JSON, str]
@@ -125,11 +127,11 @@ class AsyncBoxline:
         self.project = AsyncProject(self)
         self.api_keys = AsyncApiKeys(self)
         self.sessions = AsyncSessions(self)
-        self.contexts = AsyncContexts(self)
+        self.profiles = AsyncProfiles(self)
         self.crawl = AsyncCrawl(self)
         self.agent = AsyncAgent(self)
         self.tasks = AsyncTasks(self)
-        self.secrets = AsyncSecrets(self)
+        self.credentials = AsyncCredentials(self)
         self.webhooks = AsyncWebhooks(self)
         self.extensions = AsyncExtensions(self)
 
@@ -514,8 +516,8 @@ class AsyncSessions:
         keep_alive: Optional[bool] = None,
         viewport: Optional[Dict[str, int]] = None,
         user_metadata: Optional[JSON] = None,
-        context: Optional[Union[str, JSON]] = None,
-        persist_context: bool = False,
+        profile: Optional[Union[str, JSON]] = None,
+        persist_profile: bool = False,
         record_session: Optional[bool] = None,
         setup: Optional[Sequence[str]] = None,
         proxy: Optional[Proxy] = None,
@@ -525,7 +527,7 @@ class AsyncSessions:
         cookie_banners: Optional[str] = None,
         extensions: Optional[Sequence[str]] = None,
         env: Optional[Dict[str, Union[str, int, float, bool]]] = None,
-        secrets: Optional[Sequence[str]] = None,
+        credentials: Optional[Sequence[str]] = None,
         idle_timeout: Optional[int] = None,
         *,
         options: Optional[RequestOptions] = None,
@@ -535,7 +537,7 @@ class AsyncSessions:
         ``timeout`` is the session's length in seconds (default 300). ``idle_timeout`` (opt-in, 30 to ``timeout``): the
         session ends (end reason ``idle``) after that many seconds without activity (CDP commands, live-view input,
         terminal keys, exec, files, actions and steps, scripts, agent steps and messages; an agent run working in it, or
-        one that can still be continued, counts the whole time). ``context`` is a saved login's id (or
+        one that can still be continued, counts the whole time). ``profile`` is a browser profile's id (or
         ``{"id": ..., "persist": True}``) to start from its cookies and local storage; ``setup`` lists shell commands
         (package installs) run at start.
 
@@ -565,11 +567,12 @@ class AsyncSessions:
         ``env`` (needs ``shell=True``): variables for the session's shell, ``{"NAME": "value"}``: new terminals, exec,
         scripts and ``setup`` commands get them, and they are set again on every new machine (move, resume, recovery).
         Names like the shell's (not PATH, HOME or BOXLINE_*), at most 100, 64 KB together; the session shows the names
-        only. ``secrets`` (needs ``shell=True``): project secrets exported into the shell as ``$NAME`` (scope "shell" or
-        "all", or ``shell: True``; SecretNotAllowedError otherwise), kept in the machine's memory only and hidden in
-        exec, script and terminal output. Anything that runs in the shell can read them: export only what you accept
-        that for."""
-        ctx = {"id": context, "persist": persist_context} if isinstance(context, str) else context
+        only. ``credentials`` (needs ``shell=True``): credentials exported into the shell (scope "shell" or "all", or
+        ``shell: True``; CredentialNotAllowedError otherwise): a secret as ``$NAME``, a password as ``$NAME_USERNAME``
+        and ``$NAME_PASSWORD`` (its 2FA code comes from ``boxline-otp NAME``; the key itself never enters the machine).
+        Kept in the machine's memory only and hidden in exec, script and terminal output. Anything that runs in the
+        shell can read them: export only what you accept that for."""
+        ctx = {"id": profile, "persist": persist_profile} if isinstance(profile, str) else profile
         body = clean(
             {
                 "browser": browser_options if browser_options is not None else browser,
@@ -578,7 +581,7 @@ class AsyncSessions:
                 "keepAlive": keep_alive,
                 "viewport": viewport,
                 "userMetadata": user_metadata,
-                "context": ctx,
+                "profile": ctx,
                 "recordSession": record_session,
                 "setup": as_list(setup),
                 "proxy": proxy,
@@ -587,7 +590,7 @@ class AsyncSessions:
                 "cookieBanners": cookie_banners,
                 "extensions": as_list(extensions),
                 "env": env,
-                "secrets": as_list(secrets),
+                "credentials": as_list(credentials),
                 "idleTimeout": idle_timeout,
             }
         )
@@ -722,14 +725,16 @@ class AsyncSessions:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         shell: Optional[Union[str, bool]] = None,
-        secrets: Optional[Sequence[str]] = None,
+        credentials: Optional[Sequence[str]] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.ExecResult:
         """Runs a command (persistent bash by default: cd/export survive). ``shell=False`` runs it in a fresh process.
-        ``cwd``, ``env`` and ``secrets`` (project secrets as environment variables, scope "shell" or "all") apply to this
-        command only; the session's exported secrets and these are hidden in the output as ``%NAME%``."""
-        body = clean({"command": command, "timeoutMs": timeout_ms, "cwd": cwd, "env": env, "shell": shell, "secrets": as_list(secrets)})
+        ``cwd``, ``env`` and ``credentials`` (credentials as environment variables, scope "shell" or "all": a secret
+        as ``$NAME``, a password as ``$NAME_USERNAME`` and ``$NAME_PASSWORD``, and ``boxline-otp NAME`` prints its 2FA
+        code) apply to this command only; the session's exported credentials and these are hidden in the output as
+        ``%NAME%``."""
+        body = clean({"command": command, "timeoutMs": timeout_ms, "cwd": cwd, "env": env, "shell": shell, "credentials": as_list(credentials)})
         return await self._c._json("POST", f"/v1/sessions/{seg(session_id)}/exec", json=body, options=options, timeout=(timeout_ms or 120_000) / 1000 + 30 + SETUP_WAIT_S)
 
     async def exec_stream(
@@ -740,12 +745,12 @@ class AsyncSessions:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         shell: Optional[Union[str, bool]] = None,
-        secrets: Optional[Sequence[str]] = None,
+        credentials: Optional[Sequence[str]] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> "AsyncExecStream":
-        """Runs a command and streams its output (see ``ExecStream``); ``secrets`` as for ``exec``."""
-        body = clean({"command": command, "timeoutMs": timeout_ms, "cwd": cwd, "env": env, "shell": shell, "secrets": as_list(secrets), "stream": True})
+        """Runs a command and streams its output (see ``ExecStream``); ``credentials`` as for ``exec``."""
+        body = clean({"command": command, "timeoutMs": timeout_ms, "cwd": cwd, "env": env, "shell": shell, "credentials": as_list(credentials), "stream": True})
         return AsyncExecStream(await self._c._stream("POST", f"/v1/sessions/{seg(session_id)}/exec", json=body, options=options))
 
     async def run_script(
@@ -755,8 +760,7 @@ class AsyncSessions:
         env: Optional[Dict[str, str]] = None,
         timeout_ms: Optional[int] = None,
         ai: Optional[Dict[str, str]] = None,
-        secrets: Optional[Sequence[str]] = None,
-        login: Optional[bool] = None,
+        credentials: Optional[Sequence[str]] = None,
         allow_with_extensions: Optional[bool] = None,
         *,
         options: Optional[RequestOptions] = None,
@@ -767,11 +771,11 @@ class AsyncSessions:
         ``{provider, model}``, else the last ``useModel()``, else ``ai`` (``{"provider": ..., "model": ...}``), else
         the platform default.
 
-        ``secrets``: project secrets the script's ``step()`` calls may use as ``%NAME%`` (scope "agent" or "all"); the
-        values never enter the machine, and the grant is for this run only. ``login=True`` lets ``step()`` use the
-        session's saved login details (``%login.username%``, ``%login.password%``, ``%login.otp%``). In a session with
-        Chrome extensions both need ``allow_with_extensions=True`` (VariablesWithExtensionsError otherwise)."""
-        body = clean({"code": code, "env": env, "timeoutMs": timeout_ms, "ai": ai, "secrets": as_list(secrets), "login": login, "allowWithExtensions": allow_with_extensions})
+        ``credentials``: credentials the script's ``step()`` calls may use as placeholders (scope "agent" or "all");
+        the values never enter the machine, and the grant is for this run only. A credential the session's profile links
+        is used only when it is listed here. In a session with Chrome extensions they need
+        ``allow_with_extensions=True`` (VariablesWithExtensionsError otherwise)."""
+        body = clean({"code": code, "env": env, "timeoutMs": timeout_ms, "ai": ai, "credentials": as_list(credentials), "allowWithExtensions": allow_with_extensions})
         return AsyncExecStream(await self._c._stream("POST", f"/v1/sessions/{seg(session_id)}/scripts/run", json=body, options=options))
 
     async def restart_shell(self, session_id: str, name: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> None:
@@ -1060,7 +1064,7 @@ class AsyncSession:
         variables: Optional[Dict[str, str]] = None,
         provider: Optional[str] = None,
         model: Optional[str] = None,
-        secrets: Optional[Sequence[str]] = None,
+        credentials: Optional[Sequence[str]] = None,
         allow_with_extensions: Optional[bool] = None,
         *,
         options: Optional[RequestOptions] = None,
@@ -1068,11 +1072,12 @@ class AsyncSession:
         """Runs one plain-English step ("click Sign in", "type %email% into the email field"). Variable values are
         filled in on the server and never sent to the model. Returns what was done and the Playwright ``code``.
 
-        ``secrets``: project secrets usable as ``%NAME%`` (scope "agent" or "all"), each only on its own sites and in
-        the shell only with ``shell: True``; the result never shows their values. In a session whose saved login has
-        login details, ``%login.username%``, ``%login.password%`` and ``%login.otp%`` work too. In a session with Chrome
-        extensions, secrets need ``allow_with_extensions=True`` (VariablesWithExtensionsError otherwise)."""
-        body = {"action": "step", "instruction": instruction, "variables": variables, "provider": provider, "model": model, "secrets": as_list(secrets), "allowWithExtensions": allow_with_extensions}
+        ``credentials``: credentials usable as placeholders (scope "agent" or "all"): ``%NAME%`` for a secret,
+        ``%NAME.username%``, ``%NAME.password%`` and ``%NAME.otp%`` for a password, each only on its own sites and in the
+        shell only with ``shell: True``; the result never shows their values. In a session whose profile links a
+        password credential, that credential is offered too. In a session with Chrome extensions, credentials need
+        ``allow_with_extensions=True`` (VariablesWithExtensionsError otherwise)."""
+        body = {"action": "step", "instruction": instruction, "variables": variables, "provider": provider, "model": model, "credentials": as_list(credentials), "allowWithExtensions": allow_with_extensions}
         return await self._one(clean(body), options)
 
     async def extract(self, instruction: str, schema: Optional[JSON] = None, provider: Optional[str] = None, model: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.ExtractValue:
@@ -1111,6 +1116,25 @@ class AsyncSession:
     async def type(self, text: str, selector: Optional[str] = None, delay_ms: Optional[int] = None, *, options: Optional[RequestOptions] = None) -> None:
         """Types text with the keyboard (into ``selector`` if given)."""
         await self._one(clean({"action": "type", "text": text, "selector": selector, "delayMs": delay_ms}), options)
+
+    async def type_credential(
+        self,
+        credential: str,
+        field: Optional[t.CredentialField] = None,
+        selector: Optional[str] = None,
+        allow_with_extensions: Optional[bool] = None,
+        *,
+        options: Optional[RequestOptions] = None,
+    ) -> None:
+        """Types a credential's value without it passing through you: ``field`` is ``"username"``, ``"password"`` or
+        ``"otp"`` (the current 2FA code, made when it is typed) for a password credential, and left out for a secret. A
+        credential with sites (every password) goes only into the field ``selector`` names, whose own frame must be on
+        one of its sites, checked right before writing; one without sites may be typed where the focus is. The value is
+        never in the reply or the session's log. Needs scope "agent" or "all" (CredentialNotAllowedError for "shell");
+        the first use per session is audited. In a session with Chrome extensions it needs
+        ``allow_with_extensions=True``."""
+        body = {"action": "type", "credential": credential, "field": field, "selector": selector, "allowWithExtensions": allow_with_extensions}
+        await self._one(clean(body), options)
 
     async def press(self, key: str, *, options: Optional[RequestOptions] = None) -> None:
         await self._one({"action": "press", "key": key}, options)
@@ -1215,13 +1239,13 @@ class AsyncSession:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         shell: Optional[Union[str, bool]] = None,
-        secrets: Optional[Sequence[str]] = None,
+        credentials: Optional[Sequence[str]] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.ExecResult:
         """Runs a command (persistent bash by default: cd/export survive). Returns stdout, stderr, exitCode…
-        ``shell=False`` runs it in a fresh process; ``secrets`` are project secrets for this command only."""
-        return await self._c.sessions.exec(self.id, command, timeout_ms, cwd, env, shell, secrets, options=options)
+        ``shell=False`` runs it in a fresh process; ``credentials`` are credentials for this command only."""
+        return await self._c.sessions.exec(self.id, command, timeout_ms, cwd, env, shell, credentials, options=options)
 
     async def exec_stream(
         self,
@@ -1230,7 +1254,7 @@ class AsyncSession:
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         shell: Optional[Union[str, bool]] = None,
-        secrets: Optional[Sequence[str]] = None,
+        credentials: Optional[Sequence[str]] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> AsyncExecStream:
@@ -1242,7 +1266,7 @@ class AsyncSession:
                     print(text, end="")
             print(proc.result["exitCode"])
         """
-        return await self._c.sessions.exec_stream(self.id, command, timeout_ms, cwd, env, shell, secrets, options=options)
+        return await self._c.sessions.exec_stream(self.id, command, timeout_ms, cwd, env, shell, credentials, options=options)
 
     async def run_script(
         self,
@@ -1250,14 +1274,13 @@ class AsyncSession:
         env: Optional[Dict[str, str]] = None,
         timeout_ms: Optional[int] = None,
         ai: Optional[Dict[str, str]] = None,
-        secrets: Optional[Sequence[str]] = None,
-        login: Optional[bool] = None,
+        credentials: Optional[Sequence[str]] = None,
         allow_with_extensions: Optional[bool] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> AsyncExecStream:
         """Runs Playwright (JavaScript) code inside the session, streaming its output (see ``Sessions.run_script``)."""
-        return await self._c.sessions.run_script(self.id, code, env, timeout_ms, ai, secrets, login, allow_with_extensions, options=options)
+        return await self._c.sessions.run_script(self.id, code, env, timeout_ms, ai, credentials, allow_with_extensions, options=options)
 
     async def restart_shell(self, name: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> None:
         await self._c.sessions.restart_shell(self.id, name, options=options)
@@ -1375,11 +1398,11 @@ class AsyncFiles:
         return await self._s._c.sessions.files.wait_for(self._s.id, pattern, timeout_ms, options=options)
 
 
-# ---------------------------------------------------------------- contexts
+# ---------------------------------------------------------------- profiles
 
 
-class AsyncContexts:
-    """Saved logins: cookies and local storage to start sessions with (``context=id, persist_context=True`` fills one)."""
+class AsyncProfiles:
+    """Browser profiles: cookies and local storage to start sessions with (``profile=id, persist_profile=True`` fills one)."""
 
     def __init__(self, client: AsyncBoxline) -> None:
         self._c = client
@@ -1391,141 +1414,176 @@ class AsyncContexts:
         from_session: Optional[str] = None,
         attach: Optional[bool] = None,
         options: Optional[RequestOptions] = None,
-    ) -> t.Context:
-        """A new saved login: empty, or with ``from_session`` holding that working session's current cookies and site
+    ) -> t.Profile:
+        """A new profile: empty, or with ``from_session`` holding that working session's current cookies and site
         storage (sign in there first, e.g. in its live view). ``attach=True`` also makes the session save to it from now
-        on (at its checkpoints and when it ends); a session that already has a saved login refuses that (409
-        ``conflict``). 413 ``context_too_large`` over 16 MB; PlanLimitError (402) past the plan's ``maxContexts`` or
-        ``maxContextBytes``."""
+        on (at its checkpoints and when it ends); a session that already has a profile refuses that (409
+        ``conflict``). 413 ``profile_too_large`` over 16 MB; PlanLimitError (402) past the plan's ``maxProfiles`` or
+        ``maxProfileBytes``."""
         body = clean({"name": name, "fromSession": from_session, "attach": attach})
-        return await self._c._json("POST", "/v1/contexts", json=body, options=options)
+        return await self._c._json("POST", "/v1/profiles", json=body, options=options)
 
-    async def get(self, context_id: str, *, options: Optional[RequestOptions] = None) -> t.Context:
-        return await self._c._json("GET", f"/v1/contexts/{seg(context_id)}", options=options)
+    async def get(self, profile_id: str, *, options: Optional[RequestOptions] = None) -> t.Profile:
+        return await self._c._json("GET", f"/v1/profiles/{seg(profile_id)}", options=options)
 
-    def list(self, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> AsyncPager[t.Context]:
+    def list(self, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> AsyncPager[t.Profile]:
         """Newest first; the first page's ``total`` counts them all."""
-        return self._c._list("/v1/contexts", {"limit": limit, "after": after}, lambda c: c, options)
+        return self._c._list("/v1/profiles", {"limit": limit, "after": after}, lambda c: c, options)
 
-    async def rename(self, context_id: str, name: str, *, options: Optional[RequestOptions] = None) -> t.Context:
-        return await self._c._json("PATCH", f"/v1/contexts/{seg(context_id)}", json={"name": name}, options=options)
-
-    async def delete(self, context_id: str, *, options: Optional[RequestOptions] = None) -> None:
-        await self._c._json("DELETE", f"/v1/contexts/{seg(context_id)}", options=options)
-
-    async def set_login(
+    async def update(
         self,
-        context_id: str,
-        origin: str,
-        username: str,
-        password: str,
-        totp_secret: Optional[str] = None,
+        profile_id: str,
+        name: Optional[str] = None,
+        credential: Any = NOT_GIVEN,
         *,
         options: Optional[RequestOptions] = None,
-    ) -> t.Context:
-        """Keeps sign-in details on the saved login (plan feature ``loginDetails``), replacing earlier ones, sealed like
-        secrets. ``origin``: the one site they may be typed on (``"https://example.com"`` or ``"https://*.example.com"``);
-        ``totp_secret``: the site's 2FA setup key (base32) or an ``otpauth://totp/`` link from its QR code. Agent runs,
-        steps and scripts' ``step()`` in a session started with this context get ``%login.username%``,
-        ``%login.password%`` and ``%login.otp%`` (a TOTP code made when it is typed), only on ``origin``, never in shell
-        commands, never shown to the model. Returns the context: its ``login`` shows ``{origin, username, hasPassword,
-        hasTotp}``, never the password or the 2FA secret."""
-        body = clean({"origin": origin, "username": username, "password": password, "totpSecret": totp_secret})
-        return await self._c._json("PUT", f"/v1/contexts/{seg(context_id)}/login", json=body, options=options)
+    ) -> t.Profile:
+        """Changes the name and/or the password credential the profile signs in with (at least one).
+        ``credential="SHOP"`` links a password credential (see ``credentials``), so sessions with this profile, and agent
+        runs, task runs and steps in them, get it as if it were listed in their ``credentials`` and the AI can sign in
+        again when the cookies have expired; ``credential=None`` unlinks it. NotFoundError (404
+        ``credential_not_found``) for a name the project does not have, a 400 BoxlineError for a secret (only passwords
+        sign in), FeatureNotInPlanError (402) without the plan's ``loginDetails``."""
+        body = clean({"name": name})
+        if credential is not NOT_GIVEN:
+            body["credential"] = credential
+        return await self._c._json("PATCH", f"/v1/profiles/{seg(profile_id)}", json=body, options=options)
 
-    async def update_login(
-        self,
-        context_id: str,
-        origin: Optional[str] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        totp_secret: Any = NOT_GIVEN,
-        *,
-        options: Optional[RequestOptions] = None,
-    ) -> t.Context:
-        """Changes the login details you pass and keeps the rest (``set_login`` replaces them all); ``totp_secret=None``
-        removes 2FA. A password never moves to another site on its own: a new ``origin`` needs ``password`` in the same
-        call, and ``totp_secret`` (a new one or ``None``) when the login has 2FA (400 otherwise). A ``BoxlineError`` with
-        code ``conflict`` (409) when the login changed meanwhile: send it again."""
-        body = clean({"origin": origin, "username": username, "password": password})
-        if totp_secret is not NOT_GIVEN:
-            body["totpSecret"] = totp_secret
-        return await self._c._json("PATCH", f"/v1/contexts/{seg(context_id)}/login", json=body, options=options)
-
-    async def delete_login(self, context_id: str, *, options: Optional[RequestOptions] = None) -> None:
-        """Removes the login details (the saved cookies and storage stay)."""
-        await self._c._json("DELETE", f"/v1/contexts/{seg(context_id)}/login", options=options)
+    async def delete(self, profile_id: str, *, options: Optional[RequestOptions] = None) -> None:
+        await self._c._json("DELETE", f"/v1/profiles/{seg(profile_id)}", options=options)
 
 
-# ---------------------------------------------------------------- secrets
+# ---------------------------------------------------------------- credentials
 
 
-class AsyncSecrets:
-    """Project secrets: write-only values the AI uses as ``%NAME%`` placeholders (``secrets=`` on agent runs, steps and
-    scripts) and shells get as environment variables (``secrets=`` on ``sessions.create`` and ``exec``), depending on
-    each secret's ``scope``. The value is never returned, logged or shown; every change and use is audited."""
+class AsyncCredentials:
+    """Credentials: write-only website passwords (with an optional 2FA key) and secrets. The AI uses them as
+    placeholders (``%NAME%``, ``%SHOP.password%``) with ``credentials=`` on agent runs, steps, scripts, tasks and
+    ``Session.type_credential``; shells get them as environment variables (``credentials=`` on ``sessions.create`` and
+    ``exec``), depending on each credential's ``scope``. A value is never returned, logged or shown; every change and
+    use is audited."""
 
     def __init__(self, client: AsyncBoxline) -> None:
         self._c = client
 
-    def list(self, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> AsyncPager[t.Secret]:
-        """The project's secrets, in name order, without their values."""
-        return self._c._list("/v1/secrets", {"limit": limit, "after": after}, lambda s: s, options)
+    def list(self, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> AsyncPager[t.Credential]:
+        """The project's credentials, in name order, without their values."""
+        return self._c._list("/v1/credentials", {"limit": limit, "after": after}, lambda c: c, options)
+
+    @overload
+    async def create(
+        self,
+        name: str,
+        type: Literal["password"],
+        *,
+        origins: Sequence[str],
+        username: str,
+        password: str,
+        totp_secret: Optional[str] = None,
+        description: Optional[str] = None,
+        shell: Optional[bool] = None,
+        scope: Optional[t.CredentialScope] = None,
+        options: Optional[RequestOptions] = None,
+    ) -> t.PasswordCredential: ...
+
+    @overload
+    async def create(
+        self,
+        name: str,
+        type: Literal["secret"],
+        *,
+        value: str,
+        origins: Optional[Sequence[str]] = None,
+        description: Optional[str] = None,
+        shell: Optional[bool] = None,
+        scope: Optional[t.CredentialScope] = None,
+        options: Optional[RequestOptions] = None,
+    ) -> t.SecretCredential: ...
 
     async def create(
         self,
         name: str,
-        value: str,
-        description: Optional[str] = None,
-        origins: Optional[Sequence[str]] = None,
-        shell: Optional[bool] = None,
-        scope: Optional[str] = None,
+        type: t.CredentialType,
         *,
+        origins: Optional[Sequence[str]] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        totp_secret: Optional[str] = None,
+        value: Optional[str] = None,
+        description: Optional[str] = None,
+        shell: Optional[bool] = None,
+        scope: Optional[t.CredentialScope] = None,
         options: Optional[RequestOptions] = None,
-    ) -> t.Secret:
-        """Stores a secret, sealed; the answer never has the value.
+    ) -> t.Credential:
+        """Stores a credential, sealed; the answer never has a value.
 
         ``name``: an environment variable name in capitals (``[A-Z_][A-Z0-9_]*``, at most 64; not PATH, HOME or
-        BOXLINE_*/SANDBOXD_*/BASH_*); ``value``: 1 to 8000 characters. ``scope``: ``"agent"`` (default: only the AI, as
-        ``%NAME%``), ``"shell"`` (only as an environment variable in shells and commands) or ``"all"``. ``shell=True``
-        lets the AI use it in bash commands (and so export it). ``origins`` limits where the AI may type it
-        (recommended for passwords). SecretExistsError for a name the project has (use ``update``), PlanLimitError
-        beyond the plan's ``maxSecrets``. Not retried (the API takes no Idempotency-Key here)."""
-        body = clean({"name": name, "value": value, "description": description, "origins": as_list(origins), "shell": shell, "scope": scope})
-        return await self._c._json("POST", "/v1/secrets", json=body, options=options)
+        BOXLINE_*/SANDBOXD_*/BASH_*), one per project. ``type="password"`` takes ``origins`` (1 to 20 sites, required),
+        ``username``, ``password`` and optionally ``totp_secret`` (the site's 2FA setup key, or an ``otpauth://totp/``
+        link; needs the plan's ``loginDetails``: FeatureNotInPlanError); ``type="secret"`` takes ``value`` (1 to 8000
+        characters) and optionally ``origins``. ``scope``: ``"agent"`` (default: only the AI, as placeholders),
+        ``"shell"`` (only as environment variables in shells and commands) or ``"all"``. ``shell=True`` lets the AI use
+        it in bash commands (and so export it). CredentialExistsError for a name the project has (use ``update``),
+        PlanLimitError beyond the plan's ``maxCredentials``. Not retried (the API takes no Idempotency-Key here)."""
+        body = clean(
+            {
+                "name": name,
+                "type": type,
+                "origins": as_list(origins),
+                "username": username,
+                "password": password,
+                "totpSecret": totp_secret,
+                "value": value,
+                "description": description,
+                "shell": shell,
+                "scope": scope,
+            }
+        )
+        return await self._c._json("POST", "/v1/credentials", json=body, options=options)
 
-    async def get(self, name: str, *, options: Optional[RequestOptions] = None) -> t.Secret:
-        return await self._c._json("GET", f"/v1/secrets/{seg(name)}", options=options)
+    async def get(self, name: str, *, options: Optional[RequestOptions] = None) -> t.Credential:
+        return await self._c._json("GET", f"/v1/credentials/{seg(name)}", options=options)
 
     async def update(
         self,
         name: str,
+        *,
+        origins: Any = NOT_GIVEN,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        totp_secret: Any = NOT_GIVEN,
         value: Optional[str] = None,
         description: Any = NOT_GIVEN,
-        origins: Any = NOT_GIVEN,
         shell: Optional[bool] = None,
-        scope: Optional[str] = None,
-        *,
+        scope: Optional[t.CredentialScope] = None,
         options: Optional[RequestOptions] = None,
-    ) -> t.Secret:
-        """Changes the fields you pass; ``description=None`` clears it, ``origins=None`` allows any site. A running agent
-        run keeps the value it started with; a session that exports the secret gets the new value on its next machine
-        (move, resume, recovery)."""
-        body = clean({"value": value, "shell": shell, "scope": scope})
+    ) -> t.Credential:
+        """Changes the fields you pass (a password's ``origins``, ``username``, ``password``, ``totp_secret``; a
+        secret's ``value`` and ``origins``; for both ``description``, ``shell`` and ``scope``); the type cannot change
+        (delete it and create it again). ``description=None`` clears it, ``totp_secret=None`` removes 2FA, ``origins=None``
+        allows any site (a secret only). A new site, or a ``scope``/``shell`` that makes an AI-only credential readable by
+        shells, needs the sensitive values again in the same call (a secret's ``value``; a password's ``password``, and
+        ``totp_secret`` when it has 2FA), else a 400 ``invalid_request``; a 409 ``conflict`` when the sites, scope or
+        ``shell`` changed meanwhile (send it again). A running agent run keeps the values it started
+        with; a session that exports the credential gets the new ones on its next machine (move, resume, recovery)."""
+        body = clean({"username": username, "password": password, "value": value, "shell": shell, "scope": scope})
         if description is not NOT_GIVEN:
             body["description"] = description
+        if totp_secret is not NOT_GIVEN:
+            body["totpSecret"] = totp_secret
         if origins is not NOT_GIVEN:
             body["origins"] = None if origins is None else list(origins)
-        return await self._c._json("PATCH", f"/v1/secrets/{seg(name)}", json=body, options=options)
+        return await self._c._json("PATCH", f"/v1/credentials/{seg(name)}", json=body, options=options)
 
     async def delete(self, name: str, *, options: Optional[RequestOptions] = None) -> None:
-        """Deletes it; sessions that exported it no longer get it on their next machine."""
-        await self._c._json("DELETE", f"/v1/secrets/{seg(name)}", options=options)
+        """Deletes it; profiles that link it are unlinked, and sessions that exported it no longer get it on their next
+        machine."""
+        await self._c._json("DELETE", f"/v1/credentials/{seg(name)}", options=options)
 
-    def audit(self, name: Optional[str] = None, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> AsyncPager[t.SecretAuditEntry]:
-        """Changes to secrets and saved login details, and each use (once per session, command, run or script), newest
-        first; ``name`` picks one secret (or a context id, for login details). Never values."""
-        return self._c._list("/v1/secrets/audit", {"name": name, "limit": limit, "after": after}, lambda e: e, options)
+    def audit(self, name: Optional[str] = None, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> AsyncPager[t.CredentialAuditEntry]:
+        """Changes to credentials, and each use (once per session, command, run, script, task run, typed field or 2FA
+        code), newest first; ``name`` picks one credential. Never values."""
+        return self._c._list("/v1/credentials/audit", {"name": name, "limit": limit, "after": after}, lambda e: e, options)
 
 
 # ---------------------------------------------------------------- crawl
@@ -1681,7 +1739,7 @@ _TASK_RUN_OPEN = ["queued", "running", "paused"]
 
 class AsyncTasks:
     """Tasks: saved agent runs (an instruction with ``%name%`` variables, an optional output schema, browser settings,
-    a saved login and a model), run by hand or on a schedule. Every run is an agent run tagged with the task. Needs the
+    a browser profile and a model), run by hand or on a schedule. Every run is an agent run tagged with the task. Needs the
     plan's ``agentRuns``; the plan limits tasks and schedules switched on (PlanLimitError)."""
 
     def __init__(self, client: AsyncBoxline) -> None:
@@ -1694,12 +1752,12 @@ class AsyncTasks:
         variables: Optional[Sequence[t.TaskVariable]] = None,
         output: Optional[t.OutputSchema] = None,
         browser: Optional[JSON] = None,
-        saved_login: Optional[Union[str, JSON]] = None,
+        profile: Optional[Union[str, JSON]] = None,
         model: Optional[Dict[str, str]] = None,
         max_steps: Any = NOT_GIVEN,
         notify_on_failure: Optional[str] = None,
         schedule: Optional[JSON] = None,
-        secrets: Optional[Sequence[str]] = None,
+        credentials: Optional[Sequence[str]] = None,
         max_cost_usd: Optional[float] = None,
         *,
         options: Optional[RequestOptions] = None,
@@ -1710,13 +1768,13 @@ class AsyncTasks:
         or ``{"name", "secret": True, "origins", "shell"}`` for a value that is never stored (it comes with every run,
         and the model sees only ``%name%``). ``output``: a JSON Schema every run's answer must match (see
         ``agent.run``). ``browser``: the settings of each run's own session, with the API's keys (``{"proxy": {"type":
-        "residential", "country": "GB"}, "blockAds": True, "locale": "en-GB"}``). ``saved_login``: a context id, or
+        "residential", "country": "GB"}, "blockAds": True, "locale": "en-GB"}``). ``profile``: a browser profile id, or
         ``{"id", "persist"}``. ``model``: ``{"provider", "model"}`` from ``agent.models()``. ``max_steps``: 1-1000
         (default 30 when not passed); ``max_steps=None`` means no step limit. ``max_cost_usd``: each run's money budget
         (0.01-100 USD, as on ``agent.run``). ``browser`` also takes ``timeout`` and ``idleTimeout`` for each run's own
         session. ``schedule``: ``{"cron": "0 9 * * MON-FRI", "timezone": "Europe/London", "variables": {...},
-        "enabled": True}``: at most every 5 minutes, on the plan's ``schedules`` (PlanLimitError beyond). ``secrets``:
-        project secret names (scope "agent" or "all") each run gets as ``%NAME%``, as on ``agent.run``; a scheduled
+        "enabled": True}``: at most every 5 minutes, on the plan's ``schedules`` (PlanLimitError beyond). ``credentials``:
+        credential names (scope "agent" or "all") each run gets as placeholders, as on ``agent.run``; a scheduled
         task may use them (secret variables cannot be scheduled)."""
         body = clean(
             {
@@ -1725,11 +1783,11 @@ class AsyncTasks:
                 "variables": list(variables) if variables is not None else None,
                 "output": output,
                 "browser": browser,
-                "savedLogin": saved_login,
+                "profile": profile,
                 "model": model,
                 "notifyOnFailure": notify_on_failure,
                 "schedule": schedule,
-                "secrets": list(secrets) if secrets is not None else None,
+                "credentials": list(credentials) if credentials is not None else None,
                 "maxCostUsd": max_cost_usd,
             }
         )
@@ -1752,18 +1810,18 @@ class AsyncTasks:
         variables: Optional[Sequence[t.TaskVariable]] = None,
         output: Any = NOT_GIVEN,
         browser: Any = NOT_GIVEN,
-        saved_login: Any = NOT_GIVEN,
+        profile: Any = NOT_GIVEN,
         model: Any = NOT_GIVEN,
         max_steps: Any = NOT_GIVEN,
         notify_on_failure: Any = NOT_GIVEN,
         schedule: Any = NOT_GIVEN,
-        secrets: Any = NOT_GIVEN,
+        credentials: Any = NOT_GIVEN,
         max_cost_usd: Any = NOT_GIVEN,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.Task:
-        """Changes the fields you pass; ``None`` removes ``output``, ``browser``, ``saved_login``, ``model``,
-        ``max_cost_usd``, ``notify_on_failure``, ``schedule`` or ``secrets`` (the whole new list of secret names);
+        """Changes the fields you pass; ``None`` removes ``output``, ``browser``, ``profile``, ``model``,
+        ``max_cost_usd``, ``notify_on_failure``, ``schedule`` or ``credentials`` (the whole new list of credential names);
         ``max_steps=None`` means no step limit.
         ``schedule`` fields are merged into the current schedule (``schedule={"enabled": False}`` pauses it); switching it
         on, or changing cron or timezone, counts from now."""
@@ -1771,12 +1829,12 @@ class AsyncTasks:
         for key, value in (
             ("output", output),
             ("browser", browser),
-            ("savedLogin", saved_login),
+            ("profile", profile),
             ("model", model),
             ("maxSteps", max_steps),
             ("notifyOnFailure", notify_on_failure),
             ("schedule", schedule),
-            ("secrets", list(secrets) if secrets is not NOT_GIVEN and secrets is not None else secrets),
+            ("credentials", list(credentials) if credentials is not NOT_GIVEN and credentials is not None else credentials),
             ("maxCostUsd", max_cost_usd),
         ):
             if value is not NOT_GIVEN:
@@ -1923,8 +1981,8 @@ class AsyncAgent:
         extensions: Optional[Sequence[str]] = None,
         allow_with_extensions: Optional[bool] = None,
         output: Optional[t.OutputSchema] = None,
-        secrets: Optional[Sequence[str]] = None,
-        context: Optional[Union[str, JSON]] = None,
+        credentials: Optional[Sequence[str]] = None,
+        profile: Optional[Union[str, JSON]] = None,
         timeout: Optional[int] = None,
         idle_timeout: Optional[int] = None,
         max_cost_usd: Optional[float] = None,
@@ -1961,11 +2019,12 @@ class AsyncAgent:
         (a dict, list, …) and ``resultText`` a one-sentence summary; an answer that still does not match after one
         repair try fails the run with ``errorCode`` "output_invalid". A schema that is not valid, or over 32 KB, is a 400.
 
-        ``secrets``: project secrets as ``%NAME%`` placeholders, exactly like ``variables``, each with the secret's own
-        ``origins`` and ``shell`` rule (scope "agent" or "all"; SecretNotAllowedError for scope "shell"). An explicit
-        variable with the same name wins. ``context``: for the run's own session, a saved login to start with (its id,
-        or ``{"id", "persist"}``); with login details the run also gets ``%login.username%``, ``%login.password%`` and
-        ``%login.otp%`` on the login's site.
+        ``credentials``: credentials as placeholders, exactly like ``variables``, each with the credential's own
+        ``origins`` and ``shell`` rule (scope "agent" or "all"; CredentialNotAllowedError for scope "shell"): ``%NAME%``
+        for a secret, ``%NAME.username%``, ``%NAME.password%`` and ``%NAME.otp%`` for a password. An explicit variable
+        with the same name wins. ``profile``: for the run's own session, a browser profile to start with (its id, or
+        ``{"id", "persist"}``); when it links a password credential (``profiles.update``), the run gets that credential
+        as if it were listed in ``credentials``.
 
         The run's ``steps`` include ``handover``/``handback`` steps and, for a CAPTCHA pause, ``captcha`` steps:
         ``state`` "solving" or "waiting" (with ``kind``, ``host`` and, when waiting, ``reason``), then "solved"
@@ -1998,8 +2057,8 @@ class AsyncAgent:
                 "extensions": as_list(extensions),
                 "allowWithExtensions": allow_with_extensions,
                 "output": output,
-                "secrets": as_list(secrets),
-                "context": {"id": context} if isinstance(context, str) else context,
+                "credentials": as_list(credentials),
+                "profile": {"id": profile} if isinstance(profile, str) else profile,
                 "timeout": timeout,
                 "idleTimeout": idle_timeout,
                 "maxCostUsd": max_cost_usd,
@@ -2041,7 +2100,7 @@ class AsyncAgent:
     ) -> t.AgentRun:
         """Continues a run that stopped at one of its limits (``errorCode`` ``max_steps``, ``max_cost``,
         ``too_many_errors`` or ``no_progress``) while its ``continuable`` is set: a new run in the same session with the
-        same model, mode, output schema, secrets and saved login, and a compact record of what the previous run did.
+        same model, mode, output schema, credentials and profile, and a compact record of what the previous run did.
         Returns the new run (``continuedFrom`` links back); ``wait`` and ``stream`` work with it like any run.
 
         ``max_steps``: 1-1000 (default: the run's own); ``max_steps=None`` means no step limit. ``max_cost_usd``: the new

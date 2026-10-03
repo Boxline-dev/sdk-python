@@ -69,7 +69,7 @@ class LoginResponse(TypedDict):
 class PlanFeatures(TypedDict, total=False):
     shell: bool
     pauseResume: bool
-    contexts: bool
+    profiles: bool
     recording: bool
     realisticBrowser: bool
     residentialProxy: bool
@@ -83,7 +83,7 @@ class PlanFeatures(TypedDict, total=False):
     crawl: bool
     extensions: bool
     webSearch: bool
-    #: Login details and 2FA on saved logins.
+    #: Credentials of type "password" (with their 2FA codes).
     loginDetails: bool
     #: Model calls on Boxline's keys; without it (Free) a project runs models on its own keys only.
     platformModels: bool
@@ -113,12 +113,12 @@ class Plan(TypedDict):
     tasks: NotRequired[Optional[int]]
     #: Tasks with a schedule switched on; 0 = no schedules, None = no limit.
     schedules: NotRequired[Optional[int]]
-    #: Project secrets a project may keep.
-    maxSecrets: NotRequired[int]
-    #: Saved logins (contexts) a project may keep; None = no limit.
-    maxContexts: NotRequired[Optional[int]]
-    #: Bytes a project's saved logins may hold together; None = no limit.
-    maxContextBytes: NotRequired[Optional[int]]
+    #: Credentials (passwords and secrets together) a project may keep.
+    maxCredentials: NotRequired[int]
+    #: Browser profiles a project may keep; None = no limit.
+    maxProfiles: NotRequired[Optional[int]]
+    #: Bytes a project's profiles may hold together; None = no limit.
+    maxProfileBytes: NotRequired[Optional[int]]
     features: PlanFeatures
     public: NotRequired[bool]
 
@@ -249,8 +249,8 @@ class SessionData(TypedDict):
     captcha: CaptchaMode
     attention: Optional[CaptchaAttention]
     workspacePath: str
-    contextId: Optional[str]
-    contextPersist: NotRequired[bool]
+    profileId: Optional[str]
+    profilePersist: NotRequired[bool]
     userMetadata: Dict[str, Any]
     moves: int
     checkpointAt: Optional[str]
@@ -273,8 +273,9 @@ class SessionData(TypedDict):
     extensions: List[str]
     #: The names of the session's env variables (values are never returned).
     env: NotRequired[List[str]]
-    #: The names of the project secrets its shell exports.
-    secrets: NotRequired[List[str]]
+    #: The names of the credentials its shell exports (a credential its profile links is listed too when it went into
+    #: the shell).
+    credentials: NotRequired[List[str]]
     usage: SessionUsage
 
 
@@ -293,7 +294,7 @@ class MoveTimings(TypedDict):
 
 class StoppedProcess(TypedDict):
     pid: int
-    #: The command line, secret values hidden, at most 200 characters.
+    #: The command line, credential values hidden, at most 200 characters.
     command: str
     #: How long it had run.
     seconds: int
@@ -301,7 +302,7 @@ class StoppedProcess(TypedDict):
 
 class MoveShell(TypedDict):
     """Sessions with a shell, after a move: where the shell continues and which exported variables came along (the
-    session's env and secrets are set again as well). Running processes do not move; the stopped ones are listed."""
+    session's env and credentials are set again as well). Running processes do not move; the stopped ones are listed."""
 
     cwd: str
     exported: List[str]
@@ -493,69 +494,91 @@ class Recording(TypedDict):
     durationMs: int
 
 
-class ContextLogin(TypedDict):
-    """What a saved login shows of its login details: never the password or the 2FA secret."""
-
-    origin: str
-    username: str
-    hasPassword: bool
-    hasTotp: bool
-    updatedAt: NotRequired[str]
-
-
-class Context(TypedDict):
+class Profile(TypedDict):
     id: str
     name: str
     sizeBytes: int
     createdAt: str
     updatedAt: str
     inUseBy: Optional[str]
-    #: Its login details (contexts.set_login); None without any.
-    login: NotRequired[Optional[ContextLogin]]
+    #: The name of the password credential it signs in with (``profiles.update(id, credential=...)``), or None.
+    credential: Optional[str]
 
 
-# ---------------------------------------------------------------- secrets
+# ---------------------------------------------------------------- credentials
 
-#: Where a project secret may be used: "agent" (default): only the AI, as %NAME% in agent runs, steps and scripts'
-#: step(); "shell": only as an environment variable in session shells and commands; "all": both.
-SecretScope = Literal["agent", "shell", "all"]
+#: A credential holds a website password (with an optional 2FA key) or a secret (one value).
+CredentialType = Literal["password", "secret"]
+
+#: Where a credential may be used: "agent" (default): only the AI, as placeholders in agent runs, steps, scripts'
+#: step() and the type action; "shell": only as environment variables in session shells and commands; "all": both.
+CredentialScope = Literal["agent", "shell", "all"]
+
+#: What ``Session.type_credential`` types from a password credential: its user name, its password or its current 2FA code.
+CredentialField = Literal["username", "password", "otp"]
 
 
-class Secret(TypedDict):
-    """A project secret. Its value is never returned."""
+class PasswordCredential(TypedDict):
+    """A website password. Neither the password nor the 2FA key is ever returned."""
 
+    #: Also its placeholder (``%NAME.password%``) and its shell variable (``$NAME_PASSWORD``).
     name: str
+    type: Literal["password"]
     description: Optional[str]
-    #: Sites where the AI may type it (None = any site).
-    origins: Optional[List[str]]
+    #: The sites where the AI may type it (1 to 20).
+    origins: List[str]
+    username: str
+    #: It has a 2FA key: ``%NAME.otp%`` and ``boxline-otp NAME`` give the current code.
+    hasTotp: bool
     #: The AI may use it in bash commands; this also allows exporting it into shells.
     shell: bool
-    scope: SecretScope
-    #: "••••1a2b": the last 4 characters of values of 24 characters or more; None for shorter values and secrets with
-    #: origins.
-    preview: Optional[str]
+    scope: CredentialScope
     createdAt: str
     updatedAt: str
     lastUsedAt: Optional[str]
 
 
-class SecretUse(TypedDict):
-    type: Literal["session", "exec", "agent_run", "step", "script", "task_run"]
+class SecretCredential(TypedDict):
+    """A secret (an API key, a token). Its value is never returned."""
+
+    #: Also its placeholder (``%NAME%``) and its shell variable (``$NAME``).
+    name: str
+    type: Literal["secret"]
+    description: Optional[str]
+    #: Sites where the AI may type it (None = any site).
+    origins: Optional[List[str]]
+    #: "••••1a2b": the last 4 characters of values of 24 characters or more; None for shorter values and secrets with
+    #: origins.
+    preview: Optional[str]
+    shell: bool
+    scope: CredentialScope
+    createdAt: str
+    updatedAt: str
+    lastUsedAt: Optional[str]
+
+
+#: A credential without its values: ``c["type"]`` tells the two apart.
+Credential = Union[PasswordCredential, SecretCredential]
+
+
+class CredentialUse(TypedDict):
+    #: ``id`` is the session, or for ``agent_run`` the run and for ``task_run`` the task run.
+    type: Literal["session", "exec", "agent_run", "step", "script", "task_run", "action", "otp"]
     id: str
 
 
-class SecretAuditEntry(TypedDict):
-    """A change, or a use (once per session, command, agent run, step session or script). Never values."""
+class CredentialAuditEntry(TypedDict):
+    """A change, or a use (once per session, command, agent run, step session, script, task run, typed field or
+    ``boxline-otp`` session). Never values."""
 
     at: str
     action: Literal["create", "update", "delete", "use"]
-    #: "login": a saved login's details (``name`` is the context id).
-    kind: Literal["secret", "login"]
+    type: CredentialType
     name: str
     #: Who changed it: "user:<email>", "key:<api key id>", or "support".
     actor: NotRequired[Optional[str]]
     #: What used it.
-    usedBy: NotRequired[Optional[SecretUse]]
+    usedBy: NotRequired[Optional[CredentialUse]]
     details: NotRequired[Dict[str, Any]]
 
 
@@ -901,7 +924,7 @@ class TaskLastRun(TypedDict):
     finishedAt: Optional[str]
 
 
-class TaskSavedLogin(TypedDict):
+class TaskProfile(TypedDict):
     id: str
     persist: bool
 
@@ -913,13 +936,13 @@ class Task(TypedDict):
     name: str
     instruction: str
     variables: List[TaskVariable]
-    #: Names of the project secrets its runs get as ``%NAME%`` (never values).
-    secrets: List[str]
+    #: Names of the credentials its runs get as placeholders (never values).
+    credentials: List[str]
     output: Optional[OutputSchema]
     #: The settings of each run's own session (``shell``, ``proxy``, ``captcha``, ``mode``, ``locale``, ``timezone``,
     #: ``viewport``, ``timeout``, ``idleTimeout``, ``blockAds``, ``cookieBanners``, ``extensions``, ``allowWithExtensions``).
     browser: Optional[Dict[str, Any]]
-    savedLogin: Optional[TaskSavedLogin]
+    profile: Optional[TaskProfile]
     #: ``{"provider", "model"}``, or None for the server's default.
     model: Optional[Dict[str, str]]
     #: None: no step limit (a task saved without one shows 30).
@@ -1081,7 +1104,7 @@ WebhookEventType = Literal[
     "usage.limit_reached",
     "api_key.created",
     "api_key.revoked",
-    "secret.changed",
+    "credential.changed",
     "webhook.changed",
     "webhook.disabled",
     "extension.uploaded",
@@ -1278,13 +1301,14 @@ class WebhookApiKeyData(TypedDict):
     by: WebhookActor
 
 
-class WebhookSecretChangedData(TypedDict):
-    #: The secret's name, or for a login the context's id.
+class WebhookCredentialChangedData(TypedDict):
+    #: The credential's name.
     name: str
     action: Literal["created", "updated", "deleted"]
-    kind: Literal["secret", "login"]
+    type: CredentialType
     by: WebhookActor
-    #: Field names an update changed ("value", "origins", …).
+    #: Field names an update changed ("password", "origins", …; "profiles" when it was linked to or unlinked from a
+    #: profile).
     changed: NotRequired[List[str]]
 
 
@@ -1399,9 +1423,9 @@ class ApiKeyRevokedEvent(_TypedEvent):
     data: WebhookApiKeyData
 
 
-class SecretChangedEvent(_TypedEvent):
-    type: Literal["secret.changed"]
-    data: WebhookSecretChangedData
+class CredentialChangedEvent(_TypedEvent):
+    type: Literal["credential.changed"]
+    data: WebhookCredentialChangedData
 
 
 class WebhookChangedEvent(_TypedEvent):
@@ -1448,7 +1472,7 @@ WebhookEventPayload = Union[
     UsageLimitReachedEvent,
     ApiKeyCreatedEvent,
     ApiKeyRevokedEvent,
-    SecretChangedEvent,
+    CredentialChangedEvent,
     WebhookChangedEvent,
     WebhookDisabledEvent,
     ExtensionUploadedEvent,
