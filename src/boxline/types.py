@@ -810,7 +810,7 @@ SessionEndReason = Literal[
 #: output schema; "internal": an error on the platform's side. Other codes are those of the platform error that stopped it.
 AgentRunErrorCode = Literal[
     "spend_limit", "max_steps", "max_cost", "too_many_errors", "no_progress", "server_restarted", "session_timeout", "session_ended",
-    "output_invalid", "internal"
+    "output_invalid", "internal", "out_of_credit"
 ]
 
 
@@ -1343,8 +1343,10 @@ class WebhookSchedulePausedData(TypedDict):
 
 
 class WebhookUsageLimitData(TypedDict):
-    kind: Literal["model_spend", "proxy_gb", "captcha_solves", "searches", "concurrency"]
-    #: USD, GB, a count, or sessions at once.
+    #: The plan's limits, or the organization's money: its monthly spending limit (``spend_limit``), the project's own
+    #: (``project_spend_limit``), or its credit used up (``credit``).
+    kind: Literal["model_spend", "proxy_gb", "captcha_solves", "searches", "concurrency", "spend_limit", "project_spend_limit", "credit"]
+    #: USD (model spend, spending limits; for ``credit`` the credit used this month), GB, a count, or sessions at once.
     limit: float
     used: float
     #: "2026-09" (a UTC month), or "2026-09-30T14" (a UTC hour) for concurrency.

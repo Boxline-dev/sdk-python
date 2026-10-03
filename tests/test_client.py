@@ -285,6 +285,18 @@ def test_errors_carry_both_request_ids() -> None:
     assert "req_abc" in repr(err)
 
 
+def test_errors_carry_details_of_which_limit_refused() -> None:
+    body = {"error": {"code": "out_of_credit", "message": "no credit left", "requestId": "req_x", "details": {"limit": "credit"}}}
+    f = Fake(httpx.Response(402, json=body))
+    with pytest.raises(boxline.BoxlineError) as e:
+        f.sync().sessions.create()
+    assert (e.value.status, e.value.code, e.value.details) == (402, "out_of_credit", {"limit": "credit"})
+    f = Fake(api_error(404, "not_found"))
+    with pytest.raises(boxline.BoxlineError) as e:
+        f.sync().sessions.get("nope")
+    assert e.value.details is None
+
+
 def test_request_id_from_the_header_and_non_json_bodies() -> None:
     f = Fake(reply(content=b"<html>Bad</html>", status=400, headers={"x-request-id": "req_hdr"}))
     with pytest.raises(boxline.BoxlineError) as e:

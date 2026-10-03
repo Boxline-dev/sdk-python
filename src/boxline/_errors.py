@@ -129,6 +129,15 @@ class BoxlineError(Exception):
         self.body = body
 
     @property
+    def details(self) -> Optional[Dict[str, Any]]:
+        """Machine-readable facts the API sent with the error (``error.details``), or None. A 402 ``spend_limit`` or
+        ``out_of_credit`` has ``details["limit"]``: ``"organization"``, ``"project"``, ``"plan"`` or ``"credit"`` (which
+        limit refused the call)."""
+        err = self.body.get("error") if isinstance(self.body, dict) else None
+        details = err.get("details") if isinstance(err, dict) else None
+        return details if isinstance(details, dict) else None
+
+    @property
     def retryable(self) -> bool:
         """Whether trying the same call again later can succeed (rate limits, server errors, network trouble)."""
         if self.code == ErrorCode.IDEMPOTENCY_IN_PROGRESS:

@@ -3,6 +3,18 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
+## 1.4.0 (unreleased)
+
+### Added
+
+- **Spending limits and credit in the types.** A session's `endReason` can be `"spend_limit"` (the organization or the
+  project reached the monthly spending limit its owners set) or `"out_of_credit"`; `AgentRunErrorCode` has
+  `"out_of_credit"`; `WebhookUsageLimitData.kind` can be `"spend_limit"`, `"project_spend_limit"` or `"credit"`. Calls
+  refused for these raise a 402 error (`spend_limit`, `out_of_credit`), like the model spend cap.
+
+- **Which limit refused a 402.** `BoxlineError.details` holds the error body's `error.details` (None without):
+  a 402 `spend_limit` or `out_of_credit` has `details.limit`, `"organization"`, `"project"`, `"plan"` or `"credit"`.
+
 ## 1.3.0 (2026-10-03)
 
 ### Added
