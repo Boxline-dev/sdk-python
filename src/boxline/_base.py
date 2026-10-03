@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
@@ -26,6 +27,26 @@ DEFAULT_TIMEOUT = 120.0
 DEFAULT_MAX_RETRIES = 2
 #: A plain-English step can wait up to 4 minutes for a person to solve a CAPTCHA (session captcha "ask").
 STEP_TIMEOUT = 420.0
+#: A code wait (a pushed code or one from the credential's codeUrl) can take up to 900 s on the server.
+CODE_WAIT_TIMEOUT = 960.0
+#: The login action: 15 steps of 30 s plus the longest code wait, with a margin.
+LOGIN_TIMEOUT = 1440.0
+_WAITS_FOR_CODE = re.compile(r"%[A-Z0-9_]+\.(otp|link)%")
+
+
+def actions_wait(items: "List[Any]") -> "Optional[float]":
+    """How long an action list may take on the server: plain-English steps, code waits and the login action are slow."""
+    wait = 0.0
+    for a in items:
+        if isinstance(a, str):
+            wait = max(wait, STEP_TIMEOUT + (CODE_WAIT_TIMEOUT if _WAITS_FOR_CODE.search(a) else 0))
+        elif a.get("action") == "login":
+            wait = max(wait, LOGIN_TIMEOUT)
+        elif a.get("action") == "step":
+            wait = max(wait, STEP_TIMEOUT + (CODE_WAIT_TIMEOUT if _WAITS_FOR_CODE.search(str(a)) else 0))
+        elif a.get("action") == "type" and a.get("credential") and a.get("field") == "otp":
+            wait = max(wait, CODE_WAIT_TIMEOUT)
+    return wait or None
 
 #: The POSTs whose Idempotency-Key the API honours (docs/CONTRACT.md "Idempotency keys"); only these are retried.
 #: ``:id`` stands for one path segment.

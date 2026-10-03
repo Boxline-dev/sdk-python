@@ -1,7 +1,7 @@
 [project]
 # The distribution is boxline-sdk (the name boxline on PyPI is another project); the import name stays `boxline`.
 name = "boxline-sdk"
-version = "1.2.0"
+version = "1.3.0"
 description = "Python SDK for Boxline: cloud browsers and shell sandboxes for AI agents (sync and async)"
 readme = "README.md"
 requires-python = ">=3.9"

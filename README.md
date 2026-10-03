@@ -291,16 +291,49 @@ for e in bx.credentials.audit(name="SHOP"):
   Hiding values in output is a guard against accidents, not a boundary. A 2FA key never enters the machine:
   `boxline-otp SHOP` in the shell asks the platform for the current code.
 - `credentials.update(name, ...)` changes the fields you pass; a new site needs the sensitive values again in the same
-  call.
+  call, and so does a change of where the codes come from (`code_source`, `code_url`: the `password` again).
 - `run_script(code, credentials=[...])` lets the script's `step()` calls use credentials (the values never enter the
   machine). In a session with Chrome extensions, steps, scripts and `type_credential` need
   `allow_with_extensions=True`, as agent runs with variables do.
 - Errors: `CredentialExistsError` (use `update`), `CredentialNotAllowedError` (the scope does not allow that use),
   `NotFoundError` (`credential_not_found`), `TooManyCredentialValuesError` (the session hides as many values as it can:
   start a new one), `FeatureNotInPlanError` (a password needs the plan's `loginDetails`), `MachineTooOldError` (during
-  a deploy), `PlanLimitError` (beyond the plan's `maxCredentials`).
+  a deploy), `PlanLimitError` (beyond the plan's `maxCredentials`), `CredentialCodeTimeoutError` (no code or link came
+  in time), `CredentialLinkWrongSiteError` (a sign-in link not on the credential's sites), `CredentialLoginFailedError`
+  (`session.login` could not sign in; `run_id` is the run that tried), `CodeUrlNotAllowedError` (a `code_url` that is not
+  a public HTTPS address).
 - The `credential.changed` webhook event says a credential was created, changed (or linked to a profile) or deleted,
   never a value.
+
+### Codes sent by email or SMS, and signing in in one call
+
+A password's 2FA codes can come from an authenticator key (`code_source="totp"`, what `totp_secret` alone means), from
+**your system** (`"push"`) or from **an endpoint of yours** (`"url"`). The site's email or SMS goes to you; the AI
+never sees the code or a sign-in ("magic") link.
+
+```python
+bx.credentials.create(
+    "SHOP", "password", origins=["https://shop.example.com"], username="ops@example.com",
+    password=os.environ["SHOP_PASSWORD"],
+    code_source="push",              # or "url" with code_url="https://ops.example.com/boxline-codes"
+    code_timeout_seconds=300,        # how long a run waits for a code (5 to 900)
+)
+
+# A run, an action or `boxline-otp SHOP` that needs a code waits for a fresh one. The webhook credential.code_needed
+# ({credential, type: "code" | "link", sessionId, runId}) says when; then push what the site sent:
+bx.credentials.push_code("SHOP", code="482913")                                      # a 2FA code
+bx.credentials.push_code("SHOP", link="https://shop.example.com/magic?t=…")          # or a sign-in link
+
+# Sign in in one call: a short browser-only run with this one credential (default: the session's profile's).
+page = s.login("SHOP", url="https://shop.example.com/login")                          # {url, title, runId}
+```
+
+- A pushed code or link is used once, by a wait that began before it arrived, and kept sealed for 10 minutes. A link must
+  be on one of the credential's sites. `push_code` is not retried by the SDK (a second push is a second code).
+- With `code_source="url"` the platform asks your `code_url` every 5 s while a run waits (a signed POST; check it with
+  `verify_webhook` and the `codeUrlSecret` that `create` and `update` return once; `credentials.rotate_code_url_secret(name)`
+  makes a new one). Answer `{"code": ...}` or `{"link": ...}`, or 204 for "not yet".
+- Without a code in time a step, action or `login` raises `CredentialCodeTimeoutError`.
 
 ## A script with useModel
 
@@ -463,6 +496,7 @@ or `for p in bx.crawl.pages(id)`).
   `PayloadExpiredError`, `WebhookSignatureError` (from verify_webhook), `VariablesWithExtensionsError`,
   `InvalidExtensionError`, `PayloadTooLargeError`, `LimitReachedError`, `ExtensionDeniedError`, `CrossSiteRequestError`,
   `MissingVariablesError`, `PlanLimitError`, `CredentialExistsError`, `CredentialNotAllowedError`, `TooManyCredentialValuesError`,
+  `CredentialCodeTimeoutError`, `CredentialLinkWrongSiteError`, `CredentialLoginFailedError`, `CodeUrlNotAllowedError`,
   `MachineTooOldError`, `NotContinuableError`, `TooManyMessagesError`, `SessionNotRunningError`, `AuthenticationError`,
   `NotFoundError`, and
   `BoxlineConnectionError` /
@@ -502,7 +536,7 @@ methods without it (`session.pause()`).
 | Files | `sessions.files.list`, `read`, `read_text`, `write`, `delete`, `wait_for` |
 | Logs | `sessions.events`, `stream_events`, `pages`, `recording`, `recording_frame`; on a session: `wait_for_human` |
 | Browser profiles | `profiles.create`, `get`, `list`, `update`, `delete` |
-| Credentials | `credentials.create`, `list`, `get`, `update`, `delete`, `audit`; on a session: `type_credential` |
+| Credentials | `credentials.create`, `list`, `get`, `update`, `delete`, `audit`, `push_code`, `rotate_code_url_secret`; on a session: `type_credential`, `login` |
 | Extensions | `extensions.upload`, `list`, `get`, `delete` |
 | Web | `fetch`, `screenshot`, `pdf`, `extract`, `search`, `crawl.start`, `get`, `list`, `cancel`, `pages`, `wait` |
 | Agent | `agent.models`, `run`, `get`, `list`, `takeover`, `hand_back`, `cancel`, `continue_run`, `send_message`, `stream`, `wait` |

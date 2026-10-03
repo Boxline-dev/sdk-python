@@ -333,9 +333,21 @@ class ActionResult(TypedDict):
     #: One line saying what happened ("Dragged from (180, 200) to (400, 200) in 10 steps"); never typed text.
     text: NotRequired[str]
     error: NotRequired[str]
-    #: A stable error code when there is one (e.g. "captcha_timeout").
+    #: A stable error code when there is one (e.g. "captcha_timeout"; for ``login``: "credential_login_failed",
+    #: "credential_login_timeout", "credential_code_timeout", "credential_link_wrong_site").
     code: NotRequired[str]
+    #: ``login``: the agent run that signed in (also in its value when it worked).
+    runId: NotRequired[str]
     ms: int
+
+
+class LoginValue(TypedDict):
+    """What ``Session.login`` returns: the page the browser is on after signing in (no query or fragment) and the run
+    that did it."""
+
+    url: str
+    title: str
+    runId: str
 
 
 class ModelUsage(TypedDict):
@@ -514,8 +526,14 @@ CredentialType = Literal["password", "secret"]
 #: step() and the type action; "shell": only as environment variables in session shells and commands; "all": both.
 CredentialScope = Literal["agent", "shell", "all"]
 
-#: What ``Session.type_credential`` types from a password credential: its user name, its password or its current 2FA code.
+#: What ``Session.type_credential`` types from a password credential: its user name, its password or its current 2FA code
+#: (with a ``codeSource`` of "push" or "url" it waits for a fresh one, up to ``codeTimeoutSeconds``).
 CredentialField = Literal["username", "password", "otp"]
+
+#: Where a password's 2FA codes come from: "totp" (an authenticator key, ``totp_secret``), "push" (your system sends each
+#: code or sign-in link the site emails or texts: ``credentials.push_code``) or "url" (the platform asks your endpoint
+#: ``code_url``, signed like a webhook). A password without one has no 2FA (``codeSource`` is None).
+CredentialCodeSource = Literal["totp", "push", "url"]
 
 
 class PasswordCredential(TypedDict):
@@ -528,8 +546,15 @@ class PasswordCredential(TypedDict):
     #: The sites where the AI may type it (1 to 20).
     origins: List[str]
     username: str
-    #: It has a 2FA key: ``%NAME.otp%`` and ``boxline-otp NAME`` give the current code.
+    #: It has a 2FA key (``codeSource`` is "totp"): ``%NAME.otp%`` and ``boxline-otp NAME`` give the current code.
     hasTotp: bool
+    #: Where its 2FA codes come from; None: no 2FA.
+    codeSource: Optional[CredentialCodeSource]
+    #: The endpoint the platform asks for codes (``codeSource`` "url"); None otherwise. Its signing secret is never
+    #: shown again.
+    codeUrl: Optional[str]
+    #: How long a wait for a pushed or asked code or link lasts (5 to 900 s, default 300).
+    codeTimeoutSeconds: int
     #: The AI may use it in bash commands; this also allows exporting it into shells.
     shell: bool
     scope: CredentialScope
@@ -561,6 +586,33 @@ class SecretCredential(TypedDict):
 Credential = Union[PasswordCredential, SecretCredential]
 
 
+class PasswordCredentialWritten(PasswordCredential, total=False):
+    """A password as ``credentials.create`` and ``credentials.update`` return it: when ``code_url`` was set or changed it
+    also has ``codeUrlSecret`` (``whsec_…``), the key that signs the platform's requests to ``code_url``, shown this
+    once (a new one any time with ``credentials.rotate_code_url_secret``)."""
+
+    codeUrlSecret: str
+
+
+#: A credential as ``credentials.create`` and ``credentials.update`` return it.
+CredentialWritten = Union[PasswordCredentialWritten, SecretCredential]
+
+
+class CodeUrlSecret(TypedDict):
+    """What ``credentials.rotate_code_url_secret`` returns."""
+
+    codeUrlSecret: str
+
+
+class CredentialCodeAccepted(TypedDict):
+    """What ``credentials.push_code`` returns: the code or link is kept for a wait in progress (used once, at most 10
+    minutes)."""
+
+    accepted: Literal[True]
+    kind: Literal["code", "link"]
+    expiresAt: str
+
+
 class CredentialUse(TypedDict):
     #: ``id`` is the session, or for ``agent_run`` the run and for ``task_run`` the task run.
     type: Literal["session", "exec", "agent_run", "step", "script", "task_run", "action", "otp"]
@@ -572,7 +624,8 @@ class CredentialAuditEntry(TypedDict):
     ``boxline-otp`` session). Never values."""
 
     at: str
-    action: Literal["create", "update", "delete", "use"]
+    #: "code": a pushed 2FA code or sign-in link (``details["kind"]``), never its value.
+    action: Literal["create", "update", "delete", "use", "code"]
     type: CredentialType
     name: str
     #: Who changed it: "user:<email>", "key:<api key id>", or "support".
@@ -789,7 +842,9 @@ class AgentMessageSent(TypedDict):
 
 class AgentStep(TypedDict):
     #: message: a message you sent (``agent.send_message``), recorded when the model received it.
-    type: Literal["text", "tool", "handover", "handback", "captcha", "message"]
+    #: code: the run waits for a password's 2FA code or sign-in link (``credentials.push_code``, or your ``code_url``);
+    #: see ``state``.
+    type: Literal["text", "tool", "handover", "handback", "captcha", "message", "code"]
     at: str
     #: message steps: its id and when it was sent (``at`` is when the model got it); they also carry ``"from": "user"``
     #: (a key a TypedDict cannot name).
@@ -807,8 +862,12 @@ class AgentStep(TypedDict):
     output: NotRequired[str]
     isError: NotRequired[bool]
     ms: NotRequired[int]
-    #: captcha steps: "solving", "waiting" (a person's turn) or "solved".
-    state: NotRequired[Literal["solving", "waiting", "solved"]]
+    #: captcha steps: "solving", "waiting" (a person's turn) or "solved"; code steps: "waiting" (a wait began: push the
+    #: code or link now), then "received" or "timeout". Never the code or the link.
+    state: NotRequired[Literal["solving", "waiting", "solved", "received", "timeout"]]
+    #: code steps: the password credential whose code or link the run waits for.
+    credential: NotRequired[str]
+    #: captcha steps: the CAPTCHA kind; code steps: "code" or "link".
     kind: NotRequired[str]
     host: NotRequired[str]
     reason: NotRequired[str]
@@ -1104,6 +1163,7 @@ WebhookEventType = Literal[
     "usage.limit_reached",
     "api_key.created",
     "api_key.revoked",
+    "credential.code_needed",
     "credential.changed",
     "webhook.changed",
     "webhook.disabled",
@@ -1301,6 +1361,16 @@ class WebhookApiKeyData(TypedDict):
     by: WebhookActor
 
 
+class WebhookCredentialCodeNeededData(TypedDict):
+    #: The password credential whose code or sign-in link is awaited.
+    credential: str
+    #: What the site sends: a 2FA code or a sign-in link. Forward it now with ``credentials.push_code``.
+    type: Literal["code", "link"]
+    sessionId: str
+    #: The agent run that waits; None for an action or ``boxline-otp``.
+    runId: Optional[str]
+
+
 class WebhookCredentialChangedData(TypedDict):
     #: The credential's name.
     name: str
@@ -1423,6 +1493,11 @@ class ApiKeyRevokedEvent(_TypedEvent):
     data: WebhookApiKeyData
 
 
+class CredentialCodeNeededEvent(_TypedEvent):
+    type: Literal["credential.code_needed"]
+    data: WebhookCredentialCodeNeededData
+
+
 class CredentialChangedEvent(_TypedEvent):
     type: Literal["credential.changed"]
     data: WebhookCredentialChangedData
@@ -1472,6 +1547,7 @@ WebhookEventPayload = Union[
     UsageLimitReachedEvent,
     ApiKeyCreatedEvent,
     ApiKeyRevokedEvent,
+    CredentialCodeNeededEvent,
     CredentialChangedEvent,
     WebhookChangedEvent,
     WebhookDisabledEvent,

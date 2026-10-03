@@ -49,7 +49,7 @@ def test_headers_api_key_version_and_json_only_with_a_body() -> None:
     bx.profiles.update("prof_1", name="n")
     get, patch = f.requests
     assert get.headers["x-api-key"] == "bxl_test"
-    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/1.2.0"
+    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/1.3.0"
     assert "content-type" not in get.headers
     assert get.url.path == "/healthz"
     assert patch.headers["content-type"] == "application/json"
@@ -503,7 +503,7 @@ def test_async_retries_keys_and_errors(no_sleep: List[float]) -> None:
             assert isinstance(s, boxline.AsyncSession) and s.id == SESSION_ID
             keys = {r.headers["idempotency-key"] for r in f.requests}
             assert len(f.requests) == 3 and len(keys) == 1
-            assert f.requests[0].headers["boxline-sdk"] == "python/1.2.0"
+            assert f.requests[0].headers["boxline-sdk"] == "python/1.3.0"
         g = Fake(api_error(404, "not_found", {"x-client-request-id": "c1"}, "req_1"))
         with pytest.raises(boxline.NotFoundError) as e:
             await g.async_().sessions.get("x", options={"client_request_id": "c1"})
@@ -731,3 +731,18 @@ def test_session_actions_take_bare_string_steps_sync_and_async() -> None:
     for cls in (boxline.Session, boxline.AsyncSession, boxline.Sessions, boxline.AsyncSessions):
         hints = typing.get_type_hints(cls.actions, vars(_inspect.getmodule(cls)))
         assert str in typing.get_args(hints["actions"]), cls.__name__
+
+
+def test_login_and_code_waits_get_the_servers_time_limit() -> None:
+    # The login action and a wait for a pushed (or codeUrl) code take longer on the server than the default 120 s.
+    login = {"results": [{"ok": True, "action": "login", "value": {"url": "https://shop.example.com", "title": "Shop", "runId": "run_1"}, "ms": 1}]}
+    typed = {"results": [{"ok": True, "action": "type", "ms": 1}]}
+    step = {"results": [{"ok": True, "action": "step", "text": "Typed the code", "ms": 1}]}
+    f = Fake(reply(session()), reply(login), reply(typed), reply(step), reply(step))
+    s = f.sync().sessions.get(SESSION_ID)
+    s.login("SHOP")
+    s.type_credential("SHOP", field="otp", selector="#code")
+    s.actions("type %SHOP.otp% into the code field")
+    s.actions("click Sign in")
+    timeouts = [r.extensions["timeout"]["read"] for r in f.requests[1:]]
+    assert timeouts == [1440.0, 960.0, 420.0 + 960.0, 420.0]

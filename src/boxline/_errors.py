@@ -47,6 +47,14 @@ class ErrorCode:
     CREDENTIAL_NOT_FOUND = "credential_not_found"
     CREDENTIAL_NOT_FOR_AI = "credential_not_for_ai"
     CREDENTIAL_NOT_FOR_SHELL = "credential_not_for_shell"
+    #: 408 for ``boxline-otp``, an action result's code in a list: no code or link arrived in time.
+    CREDENTIAL_CODE_TIMEOUT = "credential_code_timeout"
+    CREDENTIAL_LINK_WRONG_SITE = "credential_link_wrong_site"
+    #: An action result's code: the ``login`` action could not sign in.
+    CREDENTIAL_LOGIN_FAILED = "credential_login_failed"
+    #: An action result's code: the ``login`` action ran out of time and its run was canceled.
+    CREDENTIAL_LOGIN_TIMEOUT = "credential_login_timeout"
+    CODE_URL_NOT_ALLOWED = "code_url_not_allowed"
     MACHINE_TOO_OLD = "machine_too_old"
     #: An agent or task run's errorCode (never an HTTP error): the answer did not match the run's output schema after
     #: the repair try (the run's ``error`` lists the problems).
@@ -262,6 +270,36 @@ class CredentialNotAllowedError(BoxlineError):
     ``shell: True``)."""
 
 
+class CredentialCodeTimeoutError(BoxlineError):
+    """``credential_code_timeout``: a password with ``code_source`` "push" or "url" waited ``codeTimeoutSeconds`` and no
+    fresh code or sign-in link came (push one with ``credentials.push_code``, or answer your ``code_url``). Raised by
+    ``session.login`` and ``session.type_credential``; ``boxline-otp`` exits 1 with it."""
+
+
+class CredentialLinkWrongSiteError(BoxlineError):
+    """400 ``credential_link_wrong_site``: a sign-in link (pushed, or answered by ``code_url``) is not on one of the
+    credential's sites, so it was not used (never opened)."""
+
+
+class CredentialLoginFailedError(BoxlineError):
+    """``credential_login_failed``: ``session.login`` could not sign in (the message says why: the run's last step).
+    ``run_id`` is the short agent run that tried (``bx.agent.get(run_id)`` has its steps); None when the API did not
+    say."""
+
+    run_id: Optional[str] = None
+
+
+class CredentialLoginTimeoutError(CredentialLoginFailedError):
+    """``credential_login_timeout``: ``session.login`` took longer than its limit (15 steps, plus the credential's
+    ``codeTimeoutSeconds`` when its codes come from your system), so the run was canceled. A kind of
+    CredentialLoginFailedError: ``run_id`` is the run, and ``bx.agent.get(run_id)`` shows where it stood."""
+
+
+class CodeUrlNotAllowedError(BoxlineError):
+    """400 ``code_url_not_allowed``: a credential's ``code_url`` is not a public HTTPS address (the webhook address
+    rules)."""
+
+
 class MachineTooOldError(BoxlineError):
     """409 ``machine_too_old``: the session's machine comes from an image older than the API (during a deploy) and cannot
     take ``env`` or ``credentials``; start a new session."""
@@ -357,6 +395,11 @@ _BY_CODE: Dict[str, Type[BoxlineError]] = {
     ErrorCode.CREDENTIAL_EXISTS: CredentialExistsError,
     ErrorCode.CREDENTIAL_NOT_FOR_AI: CredentialNotAllowedError,
     ErrorCode.CREDENTIAL_NOT_FOR_SHELL: CredentialNotAllowedError,
+    ErrorCode.CREDENTIAL_CODE_TIMEOUT: CredentialCodeTimeoutError,
+    ErrorCode.CREDENTIAL_LINK_WRONG_SITE: CredentialLinkWrongSiteError,
+    ErrorCode.CREDENTIAL_LOGIN_FAILED: CredentialLoginFailedError,
+    ErrorCode.CREDENTIAL_LOGIN_TIMEOUT: CredentialLoginTimeoutError,
+    ErrorCode.CODE_URL_NOT_ALLOWED: CodeUrlNotAllowedError,
     ErrorCode.MACHINE_TOO_OLD: MachineTooOldError,
     ErrorCode.NOT_CONTINUABLE: NotContinuableError,
     ErrorCode.TOO_MANY_MESSAGES: TooManyMessagesError,

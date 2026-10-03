@@ -3,6 +3,43 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
+## 1.3.0 (2026-10-03)
+
+### Added
+
+- **Time limits that fit the server.** `session.login`, `type_credential` with `field="otp"` and plain-English steps that use `%NAME.otp%` or
+  `%NAME.link%` wait as long as the server may (up to 24 minutes for `login`, 16 for a code), instead of the
+  default 120 s that cut off a login waiting for a pushed code.
+
+- **Codes from your own system.** A password credential's `codeSource` is `"totp"` (the authenticator key,
+  `totp_secret`; `totp_secret` alone still means this), `"push"` or `"url"`, or None for no 2FA; with `"push"` or
+  `"url"` a run, action or `boxline-otp` that needs a code (or a sign-in link) waits for a fresh one, up to
+  `codeTimeoutSeconds` (5 to 900, default 300). `credentials.create` and `credentials.update` take `code_source`,
+  `code_url` (a public HTTPS endpoint the platform asks with a signed POST) and `code_timeout_seconds`; a
+  `PasswordCredential` shows `codeSource`, `codeUrl` and `codeTimeoutSeconds`. Changing `code_source` or `code_url` needs
+  the `password` again (400 `invalid_request`, 409 `conflict` on a race). With a `code_url` the answer has `codeUrlSecret`
+  once (`types.PasswordCredentialWritten`, `types.CredentialWritten`). Types `CredentialCodeSource`.
+- **`credentials.push_code(name, code=...)` / `push_code(name, link=...)`**: sends the code or sign-in link the site
+  emailed or texted to a wait in progress (used once, kept sealed for 10 minutes; a link must be on one of the
+  credential's sites). Types `CredentialCodeAccepted`. Not retried.
+- **`credentials.rotate_code_url_secret(name)`**: a new `codeUrlSecret` for the requests to `code_url` (check them with
+  `verify_webhook`).
+- **`session.login(credential=None, url=None, allow_with_extensions=None)`** and the `login` action: signs the browser
+  in with a password credential in one call (a short browser-only agent run with that one credential and its sites).
+  Returns `{url, title, runId}` (`types.LoginValue`); an `ActionResult` of a failed `login` has `runId` and a `code`.
+- Errors `CredentialCodeTimeoutError` (`credential_code_timeout`: no code or link in time),
+  `CredentialLinkWrongSiteError` (`credential_link_wrong_site`), `CredentialLoginFailedError` (`credential_login_failed`,
+  with `run_id`), `CredentialLoginTimeoutError` (`credential_login_timeout`: the login ran out of time, 15 steps plus the
+  credential's `codeTimeoutSeconds` for a pushed or asked code, and its run was canceled; a kind of
+  `CredentialLoginFailedError`) and `CodeUrlNotAllowedError` (`code_url_not_allowed`), and the matching `ErrorCode` values.
+- `session.login` returns the page's origin only (`url`) when the page is the one a sign-in link opened, since such a link
+  can keep its token in the path.
+- The webhook event `credential.code_needed` (`types.WebhookCredentialCodeNeededData`: `credential`, `type`, `sessionId`,
+  `runId`): a run waits for a code or link, so forward the site's email or SMS now. Never a code or link.
+- The credentials audit has `action: "code"` for a pushed code or link (never its value).
+- An agent run's steps (and `agent.stream` events) have `type: "code"` while it waits for a code or link: `state`
+  `"waiting"` (push it now), then `"received"` or `"timeout"`, with `credential` and `kind`; never the value.
+
 ## 1.2.0 (2026-10-03)
 
 ### Added

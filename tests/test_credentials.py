@@ -34,6 +34,9 @@ PASSWORD = {
     "origins": ["https://shop.example.com"],
     "username": "ops@example.com",
     "hasTotp": True,
+    "codeSource": "totp",
+    "codeUrl": None,
+    "codeTimeoutSeconds": 300,
     "shell": False,
     "scope": "all",
     "createdAt": "2026-09-30T00:00:00.000Z",
@@ -277,13 +280,150 @@ def test_credential_error_codes() -> None:
         (404, "credential_not_found", boxline.NotFoundError),
         (409, "machine_too_old", boxline.MachineTooOldError),
         (400, "variables_with_extensions", boxline.VariablesWithExtensionsError),
+        (408, "credential_code_timeout", boxline.CredentialCodeTimeoutError),
+        (400, "credential_link_wrong_site", boxline.CredentialLinkWrongSiteError),
+        (422, "credential_login_failed", boxline.CredentialLoginFailedError),
+        (408, "credential_login_timeout", boxline.CredentialLoginTimeoutError),
+        (400, "code_url_not_allowed", boxline.CodeUrlNotAllowedError),
     ]
     for status, code, cls in cases:
         e = boxline.make_error(status, code, "m")
         assert isinstance(e, cls) and e.code == code and not e.retryable, code
     assert boxline.ErrorCode.TOO_MANY_CREDENTIAL_VALUES == "too_many_credential_values"
     assert boxline.ErrorCode.CREDENTIAL_NOT_FOUND == "credential_not_found"
+    assert boxline.ErrorCode.CREDENTIAL_CODE_TIMEOUT == "credential_code_timeout"
+    assert boxline.ErrorCode.CREDENTIAL_LINK_WRONG_SITE == "credential_link_wrong_site"
+    assert boxline.ErrorCode.CREDENTIAL_LOGIN_FAILED == "credential_login_failed"
+    assert boxline.ErrorCode.CODE_URL_NOT_ALLOWED == "code_url_not_allowed"
     f = Fake(api_error(409, "too_many_credential_values"))
     with pytest.raises(boxline.TooManyCredentialValuesError):
         f.sync().sessions.exec(SESSION_ID, "true", credentials=["A"])
     assert len(f.requests) == 1
+
+
+CODE = "482913"
+LINK = "https://shop.example.com/magic?token=abc123"
+URL_PASSWORD = {**PASSWORD, "hasTotp": False, "codeSource": "url", "codeUrl": "https://ops.example.com/boxline-codes"}
+
+
+def test_create_and_update_send_the_code_source_and_the_code_url_secret_comes_back_once() -> None:
+    def answer(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if request.method == "POST":
+            return reply({**URL_PASSWORD, "codeUrlSecret": "whsec_once"} if body.get("codeSource") == "url" else {**PASSWORD, "hasTotp": False, "codeSource": "push"}, 201)
+        return reply({**URL_PASSWORD, "codeUrlSecret": "whsec_twice"})
+
+    f = Fake(answer)
+    bx = f.sync()
+    push = bx.credentials.create("SHOP", "password", origins=["https://shop.example.com"], username="u", password="pw-1", code_source="push", code_timeout_seconds=120)
+    assert push["codeSource"] == "push" and "codeUrlSecret" not in push
+    url = bx.credentials.create(
+        "SHOP2", "password", origins=["https://shop.example.com"], username="u", password="pw-1", code_source="url", code_url=URL_PASSWORD["codeUrl"]
+    )
+    assert url["codeUrl"] == URL_PASSWORD["codeUrl"] and url["codeUrlSecret"] == "whsec_once"
+    assert bx.credentials.update("SHOP2", password="pw-1", code_url="https://ops.example.com/new")["codeUrlSecret"] == "whsec_twice"
+    bx.credentials.update("SHOP2", password="pw-1", code_source=None)
+    bx.credentials.update("SHOP2", code_timeout_seconds=60)
+    assert [f.body(i) for i in range(5)] == [
+        {"name": "SHOP", "type": "password", "origins": ["https://shop.example.com"], "username": "u", "password": "pw-1", "codeSource": "push", "codeTimeoutSeconds": 120},
+        {"name": "SHOP2", "type": "password", "origins": ["https://shop.example.com"], "username": "u", "password": "pw-1", "codeSource": "url", "codeUrl": URL_PASSWORD["codeUrl"]},
+        {"password": "pw-1", "codeUrl": "https://ops.example.com/new"},
+        # code_source=None removes 2FA: it reaches the API as null; a field not passed is left out.
+        {"password": "pw-1", "codeSource": None},
+        {"codeTimeoutSeconds": 60},
+    ]
+
+
+def test_push_code_sends_a_code_or_a_link_never_in_the_url_and_is_not_retried() -> None:
+    f = Fake(reply({"accepted": True, "kind": "code", "expiresAt": "2026-10-03T12:10:00.000Z"}, 202))
+    bx = f.sync()
+    assert bx.credentials.push_code("SHOP", code=CODE)["accepted"] is True
+    bx.credentials.push_code("SHOP", link=LINK)
+    assert seen(f) == ["POST /v1/credentials/SHOP/codes", "POST /v1/credentials/SHOP/codes"]
+    assert [f.body(0), f.body(1)] == [{"code": CODE}, {"link": LINK}]
+    assert all("idempotency-key" not in r.headers for r in f.requests)
+    assert not any(CODE in r.url.raw_path.decode() for r in f.requests)
+    # Exactly one of code and link.
+    with pytest.raises(ValueError):
+        bx.credentials.push_code("SHOP")
+    with pytest.raises(ValueError):
+        bx.credentials.push_code("SHOP", code=CODE, link=LINK)
+    assert len(f.requests) == 2
+
+    down = Fake(api_error(503, "unavailable", NO_WAIT))
+    with pytest.raises(boxline.BoxlineError):
+        down.sync().credentials.push_code("SHOP", code=CODE)
+    assert len(down.requests) == 1
+    with pytest.raises(boxline.CredentialLinkWrongSiteError):
+        Fake(api_error(400, "credential_link_wrong_site")).sync().credentials.push_code("SHOP", link="https://evil.example.net/x")
+    with pytest.raises(boxline.NotFoundError):
+        Fake(api_error(404, "credential_not_found")).sync().credentials.push_code("NOPE", code=CODE)
+
+
+def test_rotate_code_url_secret_and_a_refused_code_url() -> None:
+    f = Fake(reply({"codeUrlSecret": "whsec_new"}))
+    assert f.sync().credentials.rotate_code_url_secret("SHOP") == {"codeUrlSecret": "whsec_new"}
+    assert seen(f) == ["POST /v1/credentials/SHOP/code-url-secret"]
+    with pytest.raises(boxline.CodeUrlNotAllowedError) as e:
+        Fake(api_error(400, "code_url_not_allowed")).sync().credentials.create(
+            "SHOP", "password", origins=["https://shop.example.com"], username="u", password="p", code_source="url", code_url="https://127.0.0.1/x"
+        )
+    assert e.value.status == 400
+
+
+def test_async_push_code_and_rotate() -> None:
+    f = Fake(reply({"accepted": True, "kind": "link", "expiresAt": "t"}, 202))
+
+    async def go() -> Any:
+        abx = f.async_()
+        await abx.credentials.push_code("SHOP", link=LINK)
+        return await abx.credentials.rotate_code_url_secret("SHOP")
+
+    asyncio.run(go())
+    assert seen(f) == ["POST /v1/credentials/SHOP/codes", "POST /v1/credentials/SHOP/code-url-secret"]
+    assert f.body(0) == {"link": LINK}
+
+
+def test_session_login_sends_the_login_action_and_failures_raise_their_codes() -> None:
+    value = {"url": "https://shop.example.com/account", "title": "Your account", "runId": "run_1"}
+    f = Fake(reply({"results": [{"ok": True, "action": "login", "value": value, "text": "Signed in with SHOP", "ms": 9}]}))
+    s = boxline.Session(f.sync(), session())
+    assert s.login("SHOP", url="https://shop.example.com/login") == value
+    s.login()
+    s.login("SHOP", allow_with_extensions=True)
+    assert [f.body(i) for i in range(3)] == [
+        {"actions": [{"action": "login", "credential": "SHOP", "url": "https://shop.example.com/login"}]},
+        {"actions": [{"action": "login"}]},
+        {"actions": [{"action": "login", "credential": "SHOP", "allowWithExtensions": True}]},
+    ]
+
+    async def go() -> Any:
+        return await boxline.AsyncSession(f.async_(), session()).login("SHOP")
+
+    assert asyncio.run(go()) == value
+
+    def failing(code: str, **extra: Any) -> Any:
+        g = Fake(reply({"results": [{"ok": False, "action": "login", "error": "could not sign in with SHOP: the page said no", "code": code, "ms": 1, **extra}]}))
+        return boxline.Session(g.sync(), session()).login("SHOP")
+
+    with pytest.raises(boxline.CredentialLoginFailedError) as failed:
+        failing("credential_login_failed", runId="run_9")
+    assert failed.value.run_id == "run_9" and "could not sign in" in str(failed.value)
+    # A login that ran out of time and was canceled is a kind of failed login: it has the run too.
+    with pytest.raises(boxline.CredentialLoginTimeoutError) as too_slow:
+        failing("credential_login_timeout", runId="run_9")
+    assert isinstance(too_slow.value, boxline.CredentialLoginFailedError)
+    assert too_slow.value.status == 408 and too_slow.value.run_id == "run_9"
+    with pytest.raises(boxline.CredentialCodeTimeoutError) as timeout:
+        failing("credential_code_timeout", runId="run_9")
+    assert timeout.value.status == 408
+    with pytest.raises(boxline.CredentialLinkWrongSiteError):
+        failing("credential_link_wrong_site")
+    with pytest.raises(boxline.FeatureNotInPlanError):
+        failing("feature_not_in_plan")
+
+
+def test_type_credential_otp_that_never_comes_raises_the_timeout_error() -> None:
+    f = Fake(reply({"results": [{"ok": False, "action": "type", "error": "no code arrived", "code": "credential_code_timeout", "ms": 1}]}))
+    with pytest.raises(boxline.CredentialCodeTimeoutError):
+        boxline.Session(f.sync(), session()).type_credential("SHOP", "otp", "#code")

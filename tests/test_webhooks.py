@@ -134,7 +134,7 @@ def test_typed_payloads_cover_every_type() -> None:
     subscribable = set(typing.get_args(t.WebhookEventType))
     keyed = {typing.get_args(c.__annotations__["type"])[0] for c in typing.get_args(t.WebhookEventPayload)}
     assert keyed == subscribable | {"webhook.test"}
-    assert len(subscribable) == 22
+    assert len(subscribable) == 23
 
 
 def test_webhook_error_classes() -> None:

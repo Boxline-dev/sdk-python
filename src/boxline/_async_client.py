@@ -25,7 +25,7 @@ from ._base import (
     DEFAULT_TIMEOUT,
     JSON,
     NOT_GIVEN,
-    STEP_TIMEOUT,
+    actions_wait,
     Config,
     Proxy,
     RequestOptions,
@@ -40,7 +40,7 @@ from ._base import (
     seg,
     timeout_for,
 )
-from ._errors import BoxlineConnectionError, BoxlineError, BoxlineTimeoutError, CaptchaTimeoutError, ErrorCode, NotFoundError, error_from_response, make_error
+from ._errors import BoxlineConnectionError, BoxlineError, BoxlineTimeoutError, CaptchaTimeoutError, CredentialLoginFailedError, ErrorCode, NotFoundError, error_from_response, make_error
 from ._pagination import AsyncPage, AsyncPager
 
 # exec waits for the session's setup commands first (the API waits up to 10 minutes), then runs the command.
@@ -49,7 +49,16 @@ SETUP_WAIT_S = 600
 T = TypeVar("T")
 
 #: HTTP status an action result's code stands for, when one action of a list fails (the call itself answered 200).
-_ACTION_STATUS = {"captcha_timeout": 409, "model_refused": 422, "credential_not_found": 404, "feature_not_in_plan": 402}
+_ACTION_STATUS = {
+    "captcha_timeout": 409,
+    "model_refused": 422,
+    "credential_not_found": 404,
+    "feature_not_in_plan": 402,
+    "credential_code_timeout": 408,
+    "credential_link_wrong_site": 400,
+    "credential_login_failed": 422,
+    "credential_login_timeout": 408,
+}
 
 #: One action: a dict (``{"action": "goto", "url": …}``) or a bare string, which is a plain-English step.
 ActionItem = Union[JSON, str]
@@ -692,7 +701,7 @@ class AsyncSessions:
         {"action": "content"}]`` (a bare string is a plain-English step); stops at the first failure. Each result's
         ``text`` says what happened."""
         items = [actions] if isinstance(actions, (dict, str)) else list(actions)
-        wait = STEP_TIMEOUT if any(isinstance(a, str) or a.get("action") == "step" for a in items) else None
+        wait = actions_wait(items)
         r = await self._c._json("POST", f"/v1/sessions/{seg(session_id)}/actions", json=clean({"actions": items, "timeoutMs": timeout_ms}), options=options, timeout=wait)
         return r["results"]
 
@@ -1127,14 +1136,41 @@ class AsyncSession:
         options: Optional[RequestOptions] = None,
     ) -> None:
         """Types a credential's value without it passing through you: ``field`` is ``"username"``, ``"password"`` or
-        ``"otp"`` (the current 2FA code, made when it is typed) for a password credential, and left out for a secret. A
-        credential with sites (every password) goes only into the field ``selector`` names, whose own frame must be on
+        ``"otp"`` (the current 2FA code, made when it is typed; with ``code_source`` "push" or "url" it waits for a fresh
+        one, up to ``codeTimeoutSeconds``, and raises CredentialCodeTimeoutError without one) for a password credential,
+        and left out for a secret. A credential with sites (every password) goes only into the field ``selector`` names, whose own frame must be on
         one of its sites, checked right before writing; one without sites may be typed where the focus is. The value is
         never in the reply or the session's log. Needs scope "agent" or "all" (CredentialNotAllowedError for "shell");
         the first use per session is audited. In a session with Chrome extensions it needs
         ``allow_with_extensions=True``."""
         body = {"action": "type", "credential": credential, "field": field, "selector": selector, "allowWithExtensions": allow_with_extensions}
         await self._one(clean(body), options)
+
+    async def login(
+        self,
+        credential: Optional[str] = None,
+        url: Optional[str] = None,
+        allow_with_extensions: Optional[bool] = None,
+        *,
+        options: Optional[RequestOptions] = None,
+    ) -> t.LoginValue:
+        """Signs the browser in with a password credential in one call (default: the one the session's profile links;
+        ``url`` is the sign-in page, on one of the credential's sites, default the first). A short agent run does it (at
+        most 15 steps, browser tools only, only that credential and its sites; the project's default model, counted like
+        an agent run), and a credential with ``code_source`` "push" or "url" waits for its code or sign-in link, which the
+        run never sees. Returns the page it ends on (no query or fragment) and the run's id. Raises
+        CredentialLoginFailedError (its ``run_id`` is the run; CredentialLoginTimeoutError when it ran out of time and was
+        canceled), CredentialCodeTimeoutError (no code in time) or
+        CredentialLinkWrongSiteError; needs the plan's ``loginDetails`` (FeatureNotInPlanError) and a session with a
+        browser. It runs alone as one action."""
+        r = (await self.actions(clean({"action": "login", "credential": credential, "url": url, "allowWithExtensions": allow_with_extensions}), options=options))[0]
+        if r.get("ok"):
+            return r.get("value")
+        code = r.get("code") or "credential_login_failed"
+        err = make_error(_ACTION_STATUS.get(code, 400), code, r.get("error") or "could not sign in")
+        if isinstance(err, CredentialLoginFailedError):
+            err.run_id = r.get("runId")
+        raise err
 
     async def press(self, key: str, *, options: Optional[RequestOptions] = None) -> None:
         await self._one({"action": "press", "key": key}, options)
@@ -1479,12 +1515,15 @@ class AsyncCredentials:
         origins: Sequence[str],
         username: str,
         password: str,
+        code_source: Optional[t.CredentialCodeSource] = None,
         totp_secret: Optional[str] = None,
+        code_url: Optional[str] = None,
+        code_timeout_seconds: Optional[int] = None,
         description: Optional[str] = None,
         shell: Optional[bool] = None,
         scope: Optional[t.CredentialScope] = None,
         options: Optional[RequestOptions] = None,
-    ) -> t.PasswordCredential: ...
+    ) -> t.PasswordCredentialWritten: ...
 
     @overload
     async def create(
@@ -1508,20 +1547,27 @@ class AsyncCredentials:
         origins: Optional[Sequence[str]] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
+        code_source: Optional[t.CredentialCodeSource] = None,
         totp_secret: Optional[str] = None,
+        code_url: Optional[str] = None,
+        code_timeout_seconds: Optional[int] = None,
         value: Optional[str] = None,
         description: Optional[str] = None,
         shell: Optional[bool] = None,
         scope: Optional[t.CredentialScope] = None,
         options: Optional[RequestOptions] = None,
-    ) -> t.Credential:
+    ) -> t.CredentialWritten:
         """Stores a credential, sealed; the answer never has a value.
 
         ``name``: an environment variable name in capitals (``[A-Z_][A-Z0-9_]*``, at most 64; not PATH, HOME or
         BOXLINE_*/SANDBOXD_*/BASH_*), one per project. ``type="password"`` takes ``origins`` (1 to 20 sites, required),
-        ``username``, ``password`` and optionally ``totp_secret`` (the site's 2FA setup key, or an ``otpauth://totp/``
-        link; needs the plan's ``loginDetails``: FeatureNotInPlanError); ``type="secret"`` takes ``value`` (1 to 8000
-        characters) and optionally ``origins``. ``scope``: ``"agent"`` (default: only the AI, as placeholders),
+        ``username``, ``password`` and optionally where its 2FA codes come from: ``code_source="totp"`` with
+        ``totp_secret`` (the site's 2FA setup key, or an ``otpauth://totp/`` link; ``totp_secret`` alone means "totp"),
+        ``"push"`` (send each code or sign-in link with ``push_code``) or ``"url"`` with ``code_url`` (a public HTTPS
+        endpoint the platform asks with a signed POST; the answer then has ``codeUrlSecret``, shown this once);
+        ``code_timeout_seconds`` (5 to 900, default 300) is how long a "push" or "url" wait lasts (needs the plan's
+        ``loginDetails``: FeatureNotInPlanError; 400 ``code_url_not_allowed`` for a ``code_url`` that is not a public
+        HTTPS address); ``type="secret"`` takes ``value`` (1 to 8000 characters) and optionally ``origins``. ``scope``: ``"agent"`` (default: only the AI, as placeholders),
         ``"shell"`` (only as environment variables in shells and commands) or ``"all"``. ``shell=True`` lets the AI use
         it in bash commands (and so export it). CredentialExistsError for a name the project has (use ``update``),
         PlanLimitError beyond the plan's ``maxCredentials``. Not retried (the API takes no Idempotency-Key here)."""
@@ -1532,7 +1578,10 @@ class AsyncCredentials:
                 "origins": as_list(origins),
                 "username": username,
                 "password": password,
+                "codeSource": code_source,
                 "totpSecret": totp_secret,
+                "codeUrl": code_url,
+                "codeTimeoutSeconds": code_timeout_seconds,
                 "value": value,
                 "description": description,
                 "shell": shell,
@@ -1551,24 +1600,32 @@ class AsyncCredentials:
         origins: Any = NOT_GIVEN,
         username: Optional[str] = None,
         password: Optional[str] = None,
+        code_source: Any = NOT_GIVEN,
         totp_secret: Any = NOT_GIVEN,
+        code_url: Optional[str] = None,
+        code_timeout_seconds: Optional[int] = None,
         value: Optional[str] = None,
         description: Any = NOT_GIVEN,
         shell: Optional[bool] = None,
         scope: Optional[t.CredentialScope] = None,
         options: Optional[RequestOptions] = None,
-    ) -> t.Credential:
-        """Changes the fields you pass (a password's ``origins``, ``username``, ``password``, ``totp_secret``; a
-        secret's ``value`` and ``origins``; for both ``description``, ``shell`` and ``scope``); the type cannot change
-        (delete it and create it again). ``description=None`` clears it, ``totp_secret=None`` removes 2FA, ``origins=None``
-        allows any site (a secret only). A new site, or a ``scope``/``shell`` that makes an AI-only credential readable by
+    ) -> t.CredentialWritten:
+        """Changes the fields you pass (a password's ``origins``, ``username``, ``password``, ``code_source``,
+        ``totp_secret``, ``code_url``, ``code_timeout_seconds``; a secret's ``value`` and ``origins``; for both
+        ``description``, ``shell`` and ``scope``); the type cannot change (delete it and create it again).
+        ``description=None`` clears it, ``totp_secret=None`` or ``code_source=None`` removes 2FA, ``origins=None`` allows
+        any site (a secret only). A new site, or a ``scope``/``shell`` that makes an AI-only credential readable by
         shells, needs the sensitive values again in the same call (a secret's ``value``; a password's ``password``, and
-        ``totp_secret`` when it has 2FA), else a 400 ``invalid_request``; a 409 ``conflict`` when the sites, scope or
-        ``shell`` changed meanwhile (send it again). A running agent run keeps the values it started
-        with; a session that exports the credential gets the new ones on its next machine (move, resume, recovery)."""
-        body = clean({"username": username, "password": password, "value": value, "shell": shell, "scope": scope})
+        ``totp_secret`` when it has 2FA), else a 400 ``invalid_request``; so does a change of ``code_source`` (removing
+        2FA included) or ``code_url`` (the ``password`` again). A 409 ``conflict`` when the sites, scope, ``shell``,
+        ``code_source`` or ``code_url`` changed meanwhile (send it again). A new ``code_url`` answers with a new
+        ``codeUrlSecret``, shown once. A running agent run keeps the values it started with; a session that exports the
+        credential gets the new ones on its next machine (move, resume, recovery)."""
+        body = clean({"username": username, "password": password, "codeUrl": code_url, "codeTimeoutSeconds": code_timeout_seconds, "value": value, "shell": shell, "scope": scope})
         if description is not NOT_GIVEN:
             body["description"] = description
+        if code_source is not NOT_GIVEN:
+            body["codeSource"] = code_source
         if totp_secret is not NOT_GIVEN:
             body["totpSecret"] = totp_secret
         if origins is not NOT_GIVEN:
@@ -1580,9 +1637,33 @@ class AsyncCredentials:
         machine."""
         await self._c._json("DELETE", f"/v1/credentials/{seg(name)}", options=options)
 
+    async def push_code(
+        self,
+        name: str,
+        code: Optional[str] = None,
+        link: Optional[str] = None,
+        *,
+        options: Optional[RequestOptions] = None,
+    ) -> t.CredentialCodeAccepted:
+        """For a password with ``code_source="push"``: sends the code (``code=``) or the sign-in link (``link=``), exactly
+        one of them, that the site emailed or texted, for a run, action or ``boxline-otp`` that waits for it (the webhook
+        ``credential.code_needed`` says when). It is kept sealed for up to 10 minutes and used once, by a wait that began
+        before it arrived. A link must be on one of the credential's sites (400 ``credential_link_wrong_site``). 400
+        ``invalid_request`` for a credential whose source is not "push"; NotFoundError for one the project does not
+        have. Not retried (a second push is a second code). The value is never logged or returned."""
+        if (code is None) == (link is None):
+            raise ValueError("push_code takes exactly one of code= and link=")
+        body = {"code": code} if code is not None else {"link": link}
+        return await self._c._json("POST", f"/v1/credentials/{seg(name)}/codes", json=body, options=options)
+
+    async def rotate_code_url_secret(self, name: str, *, options: Optional[RequestOptions] = None) -> t.CodeUrlSecret:
+        """For a password with ``code_source="url"``: a new ``codeUrlSecret`` (``whsec_…``, shown this once). Requests to
+        ``code_url`` are signed with it from now on (check them with ``verify_webhook``); the old one stops at once."""
+        return await self._c._json("POST", f"/v1/credentials/{seg(name)}/code-url-secret", options=options)
+
     def audit(self, name: Optional[str] = None, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> AsyncPager[t.CredentialAuditEntry]:
-        """Changes to credentials, and each use (once per session, command, run, script, task run, typed field or 2FA
-        code), newest first; ``name`` picks one credential. Never values."""
+        """Changes to credentials, each use (once per session, command, run, script, task run, typed field or 2FA code)
+        and pushed codes, newest first; ``name`` picks one credential. Never values."""
         return self._c._list("/v1/credentials/audit", {"name": name, "limit": limit, "after": after}, lambda e: e, options)
 
 
