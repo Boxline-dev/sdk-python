@@ -21,7 +21,7 @@ try:
     bx.sessions.create(timeout=300, options={"idempotency_key": key})
 except IdempotencyMismatchError as e:
     print("another body with that key:", e.code)
-a.release()
+a.stop()
 
 # Your own id for a request, to find it in your logs and ours; the API's id is error.request_id.
 try:

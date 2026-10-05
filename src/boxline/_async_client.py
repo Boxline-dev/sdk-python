@@ -623,7 +623,7 @@ class AsyncSessions:
         options: Optional[RequestOptions] = None,
     ) -> AsyncPager["AsyncSession"]:
         """Sessions, newest first unless ``sort`` says otherwise (``created_asc``, ``duration_desc``). ``status``: one or
-        several (``["RUNNING", "PAUSED"]``); ``kind``: ``browser``, ``combined`` or ``shell``; ``q``: an id prefix or
+        several (``["RUNNING", "STOPPED"]``); ``kind``: ``browser``, ``combined`` or ``shell``; ``q``: an id prefix or
         text in ``userMetadata``. Iterate for every session; the first page's ``total`` counts every match.
         ``offset`` is deprecated: use ``after``."""
         params = {"status": status, "kind": kind, "q": q, "from": from_, "to": to, "sort": sort, "limit": limit, "after": after, "offset": offset}
@@ -634,7 +634,7 @@ class AsyncSessions:
         return await self.list(**filters)
 
     async def bulk(self, action: str, ids: Sequence[str], *, options: Optional[RequestOptions] = None) -> t.BulkResult:
-        """Pause, resume or release 1 to 100 sessions at once (``action``: "release", "pause" or "resume"; ``ids`` are
+        """Stop, resume or delete 1 to 100 sessions at once (``action``: "stop", "resume" or "delete"; ``ids`` are
         session ids; 30 calls per minute per project)."""
         return await self._c._json("POST", "/v1/sessions/bulk", json={"action": action, "ids": list(ids)}, options=options)
 
@@ -662,16 +662,18 @@ class AsyncSessions:
             body["idleTimeout"] = idle_timeout
         return await self._one("PATCH", f"/v1/sessions/{seg(session_id)}", body, options)
 
-    async def release(self, session_id: str, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
-        """Ends the session and deletes its machine."""
-        return await self._one("POST", f"/v1/sessions/{seg(session_id)}/release", None, options)
-
-    async def pause(self, session_id: str, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
-        """Saves cookies, storage, tabs and the workspace, then frees the machine (billing stops). Touching the session resumes it."""
-        return await self._one("POST", f"/v1/sessions/{seg(session_id)}/pause", None, options)
+    async def stop(self, session_id: str, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
+        """Saves the session exactly as it is (the whole browser, every tab with its history, and the files), frees the
+        machine and stops billing. It is kept for the plan's ``retentionDays`` (``deletesAt``), then deleted: resume it before."""
+        return await self._one("POST", f"/v1/sessions/{seg(session_id)}/stop", None, options)
 
     async def resume(self, session_id: str, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
+        """Brings a stopped session back on a fresh machine, as it was (same id; 409 ``nothing_saved`` when nothing was saved)."""
         return await self._one("POST", f"/v1/sessions/{seg(session_id)}/resume", None, options)
+
+    async def delete(self, session_id: str, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
+        """Ends the session for good: what it saved, its recording and its logs are deleted now. It cannot be undone."""
+        return await self._one("DELETE", f"/v1/sessions/{seg(session_id)}", None, options)
 
     async def move(self, session_id: str, *, options: Optional[RequestOptions] = None) -> Dict[str, Any]:
         """Moves the live session to a fresh machine: ``{"session": Session, "timings": {...}, "shell": {...} | None}``
@@ -917,9 +919,9 @@ class AsyncExecStream:
 
 
 class AsyncSession:
-    """A running (or finished) session. Attributes mirror the API: ``id``, ``status``, ``connect_url``,
+    """A running (or stopped) session. Attributes mirror the API: ``id``, ``status``, ``connect_url``,
     ``live_url``, ``terminal_url``, ``workspace_path`` (and any other field in snake_case); ``data`` has the full
-    record. Leaving the ``async with`` block releases it."""
+    record. Leaving the ``async with`` block stops it."""
 
     def __init__(self, client: AsyncBoxline, data: t.SessionData) -> None:
         self._c = client
@@ -967,9 +969,9 @@ class AsyncSession:
         return self
 
     async def __aexit__(self, *exc: Any) -> None:
-        if self.data.get("status") in ("RUNNING", "PAUSED"):
+        if self.data.get("status") == "RUNNING":
             try:
-                await self.release()
+                await self.stop()
             except BoxlineError:
                 pass
 
@@ -982,15 +984,17 @@ class AsyncSession:
     async def refresh(self, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
         return self._set(await self._c.sessions.get(self.id, options=options))
 
-    async def release(self, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
-        return self._set(await self._c.sessions.release(self.id, options=options))
-
-    async def pause(self, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
-        """Saves cookies, storage, tabs and the workspace, then frees the machine (billing stops)."""
-        return self._set(await self._c.sessions.pause(self.id, options=options))
+    async def stop(self, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
+        """Saves the session exactly as it is (the whole browser and the files), frees the machine, stops billing."""
+        return self._set(await self._c.sessions.stop(self.id, options=options))
 
     async def resume(self, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
+        """Brings a stopped session back on a fresh machine, as it was."""
         return self._set(await self._c.sessions.resume(self.id, options=options))
+
+    async def delete(self, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
+        """Ends the session for good: what it saved, its recording and its logs are deleted now. It cannot be undone."""
+        return self._set(await self._c.sessions.delete(self.id, options=options))
 
     async def rotate_urls(self, *, options: Optional[RequestOptions] = None) -> "AsyncSession":
         """Makes the current connect/live/terminal URLs stop working (e.g. one leaked) and closes connections made

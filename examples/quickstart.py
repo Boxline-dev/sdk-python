@@ -14,7 +14,7 @@ from boxline import Boxline
 url = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SITE_URL", "https://example.com")
 bx = Boxline()  # BOXLINE_API_KEY; BOXLINE_API_URL (default https://api.boxline.dev)
 
-with bx.sessions.create(timeout=300) as session:  # leaving the block releases it
+with bx.sessions.create(timeout=300) as session:  # leaving the block stops it
     print(f"session {session.id} ({session.status})")
 
     # Playwright drives the session's browser directly. connect_url is a signed URL: treat it like a password.
@@ -32,4 +32,4 @@ with bx.sessions.create(timeout=300) as session:  # leaving the block releases i
     png = session.screenshot()
     print(f"screenshot: {len(png)} bytes")
 
-print("released:", session.status, session.end_reason)
+print("stopped:", session.status, session.stop_reason)

@@ -20,21 +20,21 @@ if endpoint is None:
 state = "enabled" if endpoint["enabled"] else f"off ({endpoint['disabledReason']})"
 print(f"endpoint {endpoint['id']}: {state}, events {', '.join(endpoint['events'])}")
 
-# An event: a session that ends.
+# An event: a session that stops.
 session = bx.sessions.create(timeout=60, user_metadata={"from": "webhooks example"})
-session.release()
-print(f"session {session.id} ended ({session.end_reason})")
+session.stop()
+print(f"session {session.id} stopped ({session.stop_reason})")
 
 # Its delivery, once it has been answered.
 delivery = None
 for _ in range(60):
     recent = bx.webhooks.deliveries(endpoint["id"], limit=20)  # newest first: one page is enough
-    delivery = next((d for d in recent.data if d["eventType"] == "session.ended" and (d.get("payload") or {}).get("data", {}).get("id") == session.id and d["status"] != "pending"), None)
+    delivery = next((d for d in recent.data if d["eventType"] == "session.stopped" and (d.get("payload") or {}).get("data", {}).get("id") == session.id and d["status"] != "pending"), None)
     if delivery:
         break
     time.sleep(0.5)
 if delivery is None:
-    raise SystemExit("the session.ended delivery did not arrive within 30 s")
+    raise SystemExit("the session.stopped delivery did not arrive within 30 s")
 print(f"delivery {delivery['id']}: {delivery['status']}, HTTP {delivery['responseStatus']}, {delivery['attempts']} attempt(s), event {delivery['eventId']}")
 for a in delivery["history"]:
     print(f"  attempt at {a['at']}: {a['status'] or a['errorCode']} in {a['durationMs']} ms")

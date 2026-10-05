@@ -45,7 +45,7 @@ from boxline import Boxline
 
 bx = Boxline()  # BOXLINE_API_KEY; BOXLINE_API_URL (default https://api.boxline.dev)
 
-with bx.sessions.create(timeout=300) as session:      # leaving the block releases it
+with bx.sessions.create(timeout=300) as session:      # leaving the block stops it
     with sync_playwright() as p:
         browser = p.chromium.connect_over_cdp(session.connect_url)  # a signed URL: treat it like a password
         page = browser.contexts[0].pages[0]
@@ -56,8 +56,10 @@ with bx.sessions.create(timeout=300) as session:      # leaving the block releas
     print(session.content("markdown")["title"])
 ```
 
-`session.live_url` is a page where a person can watch and take over. `session.pause()` saves the browser and files
-and stops billing; touching the session resumes it.
+`session.live_url` is a page where a person can watch and take over. `session.stop()` saves the whole browser (every
+tab, cookies, storage) and the files, frees the machine and stops billing; `session.resume()` brings it back, same id,
+as it was. A stopped session is kept for your plan's `retentionDays` (`session.data["deletesAt"]`), then deleted;
+`session.delete()` deletes it now, with its recording and logs.
 
 ## Browser, shell and files together
 
@@ -409,7 +411,7 @@ bx.extensions.delete(ext["id"])
 Signed HTTPS callbacks when a session ends, an agent run, task run or crawl finishes, or a CAPTCHA waits for a person.
 
 ```python
-endpoint = bx.webhooks.create("https://example.com/webhooks/boxline", ["session.ended", "agent_run.finished"])
+endpoint = bx.webhooks.create("https://example.com/webhooks/boxline", ["session.stopped", "agent_run.finished"])
 # endpoint["secret"] ("whsec_…") is shown only now: store it with your other secrets.
 ```
 
@@ -469,7 +471,7 @@ Every list takes `limit` and `after`. A list call returns its first page; iterat
 follows `next`):
 
 ```python
-page = bx.sessions.list(status=["RUNNING", "PAUSED"], limit=50)
+page = bx.sessions.list(status=["RUNNING", "STOPPED"], limit=50)
 print(len(page.data), page.total, page.next)
 
 for s in bx.sessions.list(status="RUNNING"):
@@ -497,7 +499,7 @@ or `for p in bx.crawl.pages(id)`).
   `InvalidExtensionError`, `PayloadTooLargeError`, `LimitReachedError`, `ExtensionDeniedError`, `CrossSiteRequestError`,
   `MissingVariablesError`, `PlanLimitError`, `CredentialExistsError`, `CredentialNotAllowedError`, `TooManyCredentialValuesError`,
   `CredentialCodeTimeoutError`, `CredentialLinkWrongSiteError`, `CredentialLoginFailedError`, `CodeUrlNotAllowedError`,
-  `MachineTooOldError`, `NotContinuableError`, `TooManyMessagesError`, `SessionNotRunningError`, `AuthenticationError`,
+  `MachineTooOldError`, `NotContinuableError`, `TooManyMessagesError`, `SessionNotRunningError`, `NothingSavedError`, `AuthenticationError`,
   `NotFoundError`, and
   `BoxlineConnectionError` /
   `BoxlineTimeoutError` when no answer came back. `ErrorCode` has the codes.
@@ -524,13 +526,13 @@ Every request carries `Boxline-SDK: python/<version>`.
 
 Every public API operation has a method, with the Node SDK's names in snake_case (the full list is
 `docs/sdk-methods.json` in the platform repository). Session methods take the id first; a `Session` has the same
-methods without it (`session.pause()`).
+methods without it (`session.stop()`).
 
 | Area | Methods |
 |---|---|
 | Account | `me`, `has_feature`, `auth.signup`, `auth.login`, `auth.logout`, `project.trajectories`, `project.set_trajectories`, `project.settings`, `project.set_settings`, `api_keys.list`, `api_keys.create`, `api_keys.revoke` |
 | Webhooks | `webhooks.create`, `list`, `get`, `update`, `delete`, `rotate_secret`, `test`, `deliveries`, `retry_delivery`; `verify_webhook` (no request) |
-| Sessions | `sessions.create`, `get`, `list`, `update`, `release`, `pause`, `resume`, `move`, `extend`, `rotate_proxy`, `rotate_urls`, `live`, `bulk` |
+| Sessions | `sessions.create`, `get`, `list`, `update`, `stop`, `resume`, `delete`, `move`, `extend`, `rotate_proxy`, `rotate_urls`, `live`, `bulk` |
 | Browser | `sessions.actions`, `sessions.computer`; on a session: `goto`, `click`, `hover`, `fill`, `type`, `type_credential`, `press`, `scroll`, `wait`, `select`, `elements`, `evaluate`, `content`, `screenshot`, `cursor`, `upload`, `tabs`, `new_tab`, `switch_tab`, `close_tab`, `back`, `forward`, `reload`, `step`, `extract`, `export_cookies`, `computer`, `mouse.move`/`move_by`/`click`/`down`/`up`/`drag`, `keyboard.key`/`type`/`press` |
 | Shell and scripts | `sessions.exec`, `exec_stream`, `run_script`, `restart_shell` |
 | Files | `sessions.files.list`, `read`, `read_text`, `write`, `delete`, `wait_for` |

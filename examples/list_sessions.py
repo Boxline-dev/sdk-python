@@ -22,5 +22,5 @@ for n, s in enumerate(bx.sessions.list(q=tag, limit=2), 1):
 for page in first.iter_pages():
     print(f"page with {len(page.data)} sessions, next = {page.next}")
 
-results = bx.sessions.bulk("release", [s.id for s in made])["results"]
-print(f"released: {sum(r['ok'] for r in results)}/{len(results)}")
+results = bx.sessions.bulk("delete", [s.id for s in made])["results"]
+print(f"deleted: {sum(r['ok'] for r in results)}/{len(results)}")

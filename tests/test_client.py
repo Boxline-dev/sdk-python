@@ -49,7 +49,7 @@ def test_headers_api_key_version_and_json_only_with_a_body() -> None:
     bx.profiles.update("prof_1", name="n")
     get, patch = f.requests
     assert get.headers["x-api-key"] == "bxl_test"
-    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/1.3.0"
+    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/2.0.0"
     assert "content-type" not in get.headers
     assert get.url.path == "/healthz"
     assert patch.headers["content-type"] == "application/json"
@@ -158,7 +158,7 @@ def test_keys_on_exactly_the_create_routes() -> None:
     f = Fake(reply({**session(), "results": [], "data": [], "next": None}, 201))
     bx = f.sync()
     bx.sessions.create()
-    bx.sessions.bulk("pause", [SESSION_ID])
+    bx.sessions.bulk("stop", [SESSION_ID])
     bx.agent.run("t")
     bx.agent.continue_run("run_1", max_steps=None)
     bx.agent.send_message("run_1", "hi")
@@ -318,6 +318,8 @@ def test_request_id_from_the_header_and_non_json_bodies() -> None:
         (409, "captcha_timeout", boxline.CaptchaTimeoutError),
         (502, "page_unreachable", boxline.PageUnreachableError),
         (504, "page_timeout", boxline.PageTimeoutError),
+        (409, "nothing_saved", boxline.NothingSavedError),
+        (409, "session_not_running", boxline.SessionNotRunningError),
         (401, "unauthorized", boxline.AuthenticationError),
     ],
 )
@@ -362,10 +364,10 @@ def pages(request: httpx.Request) -> httpx.Response:
 def test_list_returns_the_first_page_and_iterates_every_item() -> None:
     f = Fake(pages)
     bx = f.sync()
-    first = bx.sessions.list(limit=2, status=["RUNNING", "PAUSED"])
+    first = bx.sessions.list(limit=2, status=["RUNNING", "STOPPED"])
     assert [s.id for s in first.data] == ["1-1", "1-2"]
     assert (first.total, first["total"], first.next, first.has_next_page(), len(first)) == (6, 6, "c2", True, 2)
-    assert f.requests[0].url.query == b"status=RUNNING%2CPAUSED&limit=2"
+    assert f.requests[0].url.query == b"status=RUNNING%2CSTOPPED&limit=2"
     before = len(f.requests)
     assert [s.id for s in bx.sessions.list(limit=2)] == ["1-1", "1-2", "2-1", "2-2", "3-1", "3-2"]
     assert [r.url.params.get("after") for r in f.requests[before:]] == [None, "c2", "c3"]
@@ -461,24 +463,28 @@ def test_session_objects_delegate_and_stay_fresh() -> None:
     f = Fake(
         reply(session()),
         reply({"liveUrl": "http://live/2", "terminalUrl": None, "connectUrl": "ws://connect/2"}),
-        reply(session(status="PAUSED")),
+        reply(session(status="STOPPED")),
+        reply(session(status="RUNNING")),
         reply({"session": session(status="RUNNING"), "timings": {"captureMs": 1, "acquireMs": 2, "restoreMs": 3, "totalMs": 6}}),
-        reply(session(status="COMPLETED")),
+        reply(session(status="STOPPED")),
     )
     bx = f.sync()
     with bx.sessions.get(SESSION_ID) as s:
         assert s.live()["connectUrl"] == "ws://connect/2" and s.connect_url == "ws://connect/2"
-        s.pause()
-        assert s.status == "PAUSED"
+        s.stop()
+        assert s.status == "STOPPED"
+        s.resume()
+        assert s.status == "RUNNING"
         assert s.move()["totalMs"] == 6 and s.status == "RUNNING"
         assert s.workspace_path == "/workspace" and s.terminal_url is None
-    assert s.status == "COMPLETED"  # leaving the block released it
+    assert s.status == "STOPPED"  # leaving the block stopped it
     assert [f"{r.method} {r.url.path}" for r in f.requests] == [
         f"GET /v1/sessions/{SESSION_ID}",
         f"GET /v1/sessions/{SESSION_ID}/live",
-        f"POST /v1/sessions/{SESSION_ID}/pause",
+        f"POST /v1/sessions/{SESSION_ID}/stop",
+        f"POST /v1/sessions/{SESSION_ID}/resume",
         f"POST /v1/sessions/{SESSION_ID}/move",
-        f"POST /v1/sessions/{SESSION_ID}/release",
+        f"POST /v1/sessions/{SESSION_ID}/stop",
     ]
 
 
@@ -515,7 +521,7 @@ def test_async_retries_keys_and_errors(no_sleep: List[float]) -> None:
             assert isinstance(s, boxline.AsyncSession) and s.id == SESSION_ID
             keys = {r.headers["idempotency-key"] for r in f.requests}
             assert len(f.requests) == 3 and len(keys) == 1
-            assert f.requests[0].headers["boxline-sdk"] == "python/1.3.0"
+            assert f.requests[0].headers["boxline-sdk"] == "python/2.0.0"
         g = Fake(api_error(404, "not_found", {"x-client-request-id": "c1"}, "req_1"))
         with pytest.raises(boxline.NotFoundError) as e:
             await g.async_().sessions.get("x", options={"client_request_id": "c1"})
@@ -547,14 +553,14 @@ def test_async_streams_and_session_objects() -> None:
         f = Fake(reply(content=sse, headers={"content-type": "text/event-stream"}))
         assert [e["type"] async for e in f.async_().agent.stream("run_1")] == ["text", "done"]
         nd = b'{"type":"stdout","data":"hi"}\n{"type":"exit","exitCode":0}\n'
-        g = Fake(reply(session()), reply(content=nd), reply(session(status="COMPLETED")))
+        g = Fake(reply(session()), reply(content=nd), reply(session(status="STOPPED")))
         bx = g.async_()
         async with await bx.sessions.get(SESSION_ID) as s:
             proc = await s.exec_stream("echo hi")
             async with proc:
                 assert [t async for _, t in proc] == ["hi"]
             assert proc.result is not None and proc.result["exitCode"] == 0
-        assert s.status == "COMPLETED"
+        assert s.status == "STOPPED"
         await bx.aclose()
 
     run(main())

@@ -23,7 +23,7 @@ async def main() -> None:
             print("elements:", (await s.elements())["count"], "interactive elements")
             async for listed in bx.sessions.list(status="RUNNING"):
                 print("running:", listed.id)
-        print("released:", s.status)
+        print("stopped:", s.status)
 
 
 asyncio.run(main())

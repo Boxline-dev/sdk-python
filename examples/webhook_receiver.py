@@ -25,7 +25,7 @@ registered = None
 
 if "--register" in sys.argv:
     bx = Boxline()
-    endpoint = bx.webhooks.create(URL, ["session.ended", "agent_run.finished", "crawl.finished", "captcha.waiting", "webhook.disabled"], description="webhook_receiver example")
+    endpoint = bx.webhooks.create(URL, ["session.stopped", "agent_run.finished", "crawl.finished", "captcha.waiting", "webhook.disabled"], description="webhook_receiver example")
     secrets = [endpoint["secret"]]  # shown only in this response: kept in memory, never printed
     registered = (bx, endpoint["id"])
     print(f"[receiver] registered endpoint {endpoint['id']} for {URL} ({', '.join(endpoint['events'])})", flush=True)
@@ -61,8 +61,8 @@ class Receiver(BaseHTTPRequestHandler):
         if len(handled) > 10_000:
             handled.popitem(last=False)
         d = event["data"]
-        if event["type"] == "session.ended":
-            what = f"session {d['id']} {d['status']} ({d['endReason']})"
+        if event["type"] == "session.stopped":
+            what = f"session {d['id']} {d['status']} ({d['stopReason']})"
         elif event["type"] == "webhook.test":
             what = d.get("message", "")
         else:

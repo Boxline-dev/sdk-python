@@ -44,4 +44,4 @@ for e in bx.agent.stream(run["id"]):
 
 done = bx.agent.get(run["id"])
 print(f"mode {done.get('mode')}, {len(done['steps'])} steps, ${done['usage']['costUsd']}")
-bx.sessions.release(done["sessionId"])
+bx.sessions.stop(done["sessionId"])

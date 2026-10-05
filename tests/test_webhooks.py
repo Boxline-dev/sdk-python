@@ -73,15 +73,15 @@ def test_error_details() -> None:
 
 
 def test_returns_the_event() -> None:
-    body = json.dumps({"id": "evt_7", "type": "session.ended", "createdAt": "t", "projectId": "p", "data": {"status": "COMPLETED"}}).encode()
+    body = json.dumps({"id": "evt_7", "type": "session.stopped", "createdAt": "t", "projectId": "p", "data": {"status": "STOPPED"}}).encode()
     event = verify_webhook(body, webhook_signature_header("whsec_x", body), ["whsec_old", "whsec_x"])
-    assert event["id"] == "evt_7" and event["data"]["status"] == "COMPLETED"
+    assert event["id"] == "evt_7" and event["data"]["status"] == "STOPPED"
 
 
 def test_webhooks_and_settings_requests() -> None:
     f = Fake(reply({"id": "wh_1", "secret": "whsec_new", "data": [], "next": None, "captchaDefault": "solve"}))
     bx = f.sync()
-    assert bx.webhooks.create("https://example.com/hook", ["session.ended"], description="ci")["secret"] == "whsec_new"
+    assert bx.webhooks.create("https://example.com/hook", ["session.stopped"], description="ci")["secret"] == "whsec_new"
     bx.webhooks.list(limit=10)
     bx.webhooks.get("wh_1")
     bx.webhooks.update("wh_1", enabled=False)
@@ -107,7 +107,7 @@ def test_webhooks_and_settings_requests() -> None:
         "GET /v1/project/settings",
         "PUT /v1/project/settings",
     ]
-    assert f.body(0) == {"url": "https://example.com/hook", "events": ["session.ended"], "description": "ci"}
+    assert f.body(0) == {"url": "https://example.com/hook", "events": ["session.stopped"], "description": "ci"}
     assert f.body(3) == {"enabled": False}
     assert f.body(4) == {"description": None}
     assert f.body(11) == {"captchaDefault": "ask"}
@@ -134,7 +134,7 @@ def test_typed_payloads_cover_every_type() -> None:
     subscribable = set(typing.get_args(t.WebhookEventType))
     keyed = {typing.get_args(c.__annotations__["type"])[0] for c in typing.get_args(t.WebhookEventPayload)}
     assert keyed == subscribable | {"webhook.test"}
-    assert len(subscribable) == 23
+    assert len(subscribable) == 24
 
 
 def test_webhook_error_classes() -> None:

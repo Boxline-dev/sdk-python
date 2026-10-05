@@ -3,7 +3,34 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
-## 1.4.0 (unreleased)
+## 2.0.0 (2026-10-05)
+
+### Breaking
+
+- **Three actions replace `release` and `pause`: stop, resume, delete.** `session.stop()` / `sessions.stop(id)` saves the
+  session exactly as it is (the whole browser, every tab with its history, and the files), frees the machine and stops
+  billing; `resume()` brings it back on a fresh machine with the same id; `session.delete()` / `sessions.delete(id)` ends
+  it for good and deletes what it saved, its recording and its logs now. `release()` and `pause()` are gone, and so is
+  `bulk("release" | "pause", …)`: `bulk` takes `"stop"`, `"resume"` or `"delete"`. Leaving a `with` (or `async with`)
+  block now stops the session.
+- **A session you stop can be resumed.** Everything that ended a session (its `timeout`, an `idle_timeout`, no clients, an
+  agent run finishing, a spending limit, a lost machine) now stops it, keeping it for the plan's `retentionDays`
+  (`deletesAt`). A stopped session is free and does not count towards concurrency. `resume()` raises a 409
+  `nothing_saved` error (`NothingSavedError`, `ErrorCode.NOTHING_SAVED`) when nothing was saved (a machine lost before its first checkpoint).
+- **A call on a stopped session no longer resumes it.** Actions, files, exec and connect on a `STOPPED` session fail with
+  409 `session_not_running`: call `resume()` first. An agent run given a stopped `session_id`, and `continue_run`, resume it.
+- **A stop ends the session's URLs for good.** Stopping rotates `connectUrl`, `liveUrl` and `terminalUrl` (as `rotate_urls`
+  does): the ones you held before the stop stay refused after a resume, and the session `resume()` returns has fresh
+  ones. Stop, resume and delete are limited to 60 calls a minute per project (a bulk call counts as one); beyond it, 429
+  `rate_limited`.
+- **Statuses and fields.** `SessionStatus` is `"RUNNING" | "STOPPED" | "DELETED" | "ERROR"` (`"PAUSED"` and `"COMPLETED"`
+  are gone). `SessionData` has `stoppedAt`, `stopReason` (`SessionStopReason`: `requested`, `timeout`, `idle`,
+  `no_clients`, `agent_run`, `task`, `machine_lost`, `api_restart`, `account_recovered`, `suspended`, `spend_limit`, `out_of_credit`),
+  `deletesAt`, `deletedAt` and `deleteReason`; `endedAt`, `endReason` (`SessionEndReason`) and `dataDeletedAt` are gone.
+- **Webhooks.** `session.stopped` and `session.deleted` replace `session.ended` (`WebhookEventType`,
+  `SessionStoppedEvent`, `SessionDeletedEvent`); an endpoint that listened for `session.ended` has to listen for them.
+- **Plans and prices.** The plan feature `pauseResume` is gone (stop and resume work on every plan), and
+  `Pricing["pausedSessions"]` became `Pricing["stoppedSessions"]` (`{"perHour": 0}`).
 
 ### Added
 

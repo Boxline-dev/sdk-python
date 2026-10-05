@@ -86,8 +86,12 @@ class ErrorCode:
     MODEL_ERROR = "model_error"
     #: 413: ``profiles.create(from_session=…)`` when the session's cookies and site storage exceed 16 MB.
     PROFILE_TOO_LARGE = "profile_too_large"
-    #: 409: the session has ended (e.g. an agent run started or continued in it).
+    #: 409: the session is not running (it stopped or was deleted): a call on it, an agent run in a deleted one.
     SESSION_NOT_RUNNING = "session_not_running"
+    #: 409: ``sessions.resume`` when nothing was saved (a machine lost before its first checkpoint, a session from before stop and resume).
+    NOTHING_SAVED = "nothing_saved"
+    #: 409: ``sessions.resume`` on a deleted session.
+    SESSION_NOT_STOPPED = "session_not_stopped"
     UNAUTHORIZED = "unauthorized"
     NOT_FOUND = "not_found"
     CONNECTION_ERROR = "connection_error"
@@ -330,7 +334,12 @@ class RunNotLiveError(BoxlineError):
 
 
 class SessionNotRunningError(BoxlineError):
-    """409 ``session_not_running``: the session has ended (an agent run started or continued in it, a command, …)."""
+    """409 ``session_not_running``: the session is stopped or deleted (a call on a stopped session does not wake it: resume it first)."""
+
+
+class NothingSavedError(BoxlineError):
+    """409 ``nothing_saved``: ``sessions.resume`` on a stopped session that saved nothing (a machine lost before its first
+    checkpoint, a session from before stop and resume)."""
 
 
 class WebhookSignatureError(BoxlineError):
@@ -414,6 +423,7 @@ _BY_CODE: Dict[str, Type[BoxlineError]] = {
     ErrorCode.TOO_MANY_MESSAGES: TooManyMessagesError,
     ErrorCode.RUN_NOT_LIVE: RunNotLiveError,
     ErrorCode.SESSION_NOT_RUNNING: SessionNotRunningError,
+    ErrorCode.NOTHING_SAVED: NothingSavedError,
 }
 _BY_STATUS: Dict[int, Type[BoxlineError]] = {401: AuthenticationError, 404: NotFoundError, 429: RateLimitError}
 

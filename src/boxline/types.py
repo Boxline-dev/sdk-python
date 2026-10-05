@@ -5,7 +5,8 @@ from typing import Any, Dict, List, Optional, Union
 
 from typing_extensions import Literal, NotRequired, TypedDict
 
-SessionStatus = Literal["RUNNING", "PAUSED", "COMPLETED", "ERROR"]
+#: RUNNING; STOPPED (saved, no machine, free: resume it); DELETED (ended for good); ERROR (never started).
+SessionStatus = Literal["RUNNING", "STOPPED", "DELETED", "ERROR"]
 CaptchaMode = Literal["ask", "ignore", "solve"]
 CaptchaKind = Literal["recaptcha", "hcaptcha", "turnstile", "cloudflare", "datadome", "arkose", "human"]
 WaitUntil = Literal["load", "domcontentloaded", "networkidle", "commit"]
@@ -68,7 +69,6 @@ class LoginResponse(TypedDict):
 
 class PlanFeatures(TypedDict, total=False):
     shell: bool
-    pauseResume: bool
     profiles: bool
     recording: bool
     realisticBrowser: bool
@@ -229,15 +229,21 @@ class SessionData(TypedDict):
     shell: bool
     keepAlive: bool
     timeout: int
-    #: Seconds without activity after which it ends (end reason "idle"); None: off.
+    #: Seconds without activity after which it stops (stop reason "idle"); None: off.
     idleTimeout: NotRequired[Optional[int]]
     createdAt: str
     startedAt: Optional[str]
-    endedAt: Optional[str]
     expiresAt: str
-    #: released, timeout, idle (its idle timeout passed), disconnected, agent_finished, api_restart, paused_expired,
-    #: machine_lost or account_recovered (see SessionEndReason).
-    endReason: Optional[str]
+    #: When it stopped (None while it runs; a resume clears it).
+    stoppedAt: Optional[str]
+    #: requested, timeout, idle (its idle timeout passed), no_clients, agent_run, task, machine_lost, api_restart,
+    #: account_recovered, suspended, spend_limit or out_of_credit (see SessionStopReason).
+    stopReason: Optional[str]
+    #: When a stopped session is deleted automatically: ``stoppedAt`` plus the plan's ``retentionDays``, fixed when it stops.
+    deletesAt: Optional[str]
+    #: When it was deleted, and why: "requested" (``sessions.delete``) or "retention" (its ``deletesAt`` passed).
+    deletedAt: Optional[str]
+    deleteReason: Optional[str]
     connectUrl: Optional[str]
     liveUrl: Optional[str]
     terminalUrl: Optional[str]
@@ -258,8 +264,6 @@ class SessionData(TypedDict):
     error: Optional[str]
     recordSession: bool
     hasRecording: bool
-    #: When the recording, logs and agent-run steps were deleted under the plan's ``retentionDays`` (None until then).
-    dataDeletedAt: NotRequired[Optional[str]]
     setup: List[str]
     setupStatus: Literal["none", "running", "done", "failed"]
     setupError: Optional[str]
@@ -798,15 +802,20 @@ AgentMode = Literal["tools", "computer"]
 OutputSchema = Dict[str, Any]
 
 
-#: Why a session ended.
-SessionEndReason = Literal[
-    "released", "timeout", "idle", "disconnected", "agent_finished", "api_restart", "paused_expired", "machine_lost", "account_recovered"
+#: Why a session stopped: "requested" (``sessions.stop``), "idle", "no_clients" (a browser-only session whose last client
+#: left), "agent_run" / "task" (the session an agent run, or a task's run, started), "machine_lost" (its last checkpoint
+#: is what it saved), "suspended" (an admin suspended the organization), and the rest.
+SessionStopReason = Literal[
+    "requested", "timeout", "idle", "no_clients", "agent_run", "task", "api_restart", "machine_lost", "account_recovered", "suspended", "spend_limit", "out_of_credit"
 ]
+
+#: Why a session was deleted: "requested" (``sessions.delete``) or "retention" (its ``deletesAt`` passed).
+SessionDeleteReason = Literal["requested", "retention"]
 
 #: A run's ``errorCode``. The first four are limits: the run stopped without finishing and can be continued
 #: (``agent.continue_run``) while ``continuable`` is set, and so can "server_restarted" (the API server running it stopped
 #: while its session went on). "session_timeout": its session reached its time limit;
-#: "session_ended": its session ended another way (``error`` names how); "output_invalid": the answer did not match the
+#: "session_ended": its session stopped another way (``error`` names how); "output_invalid": the answer did not match the
 #: output schema; "internal": an error on the platform's side. Other codes are those of the platform error that stopped it.
 AgentRunErrorCode = Literal[
     "spend_limit", "max_steps", "max_cost", "too_many_errors", "no_progress", "server_restarted", "session_timeout", "session_ended",
@@ -1132,7 +1141,8 @@ class Pricing(TypedDict, total=False):
     sandboxPerVcpuHour: float
     sandboxPerGibHour: float
     defaultShellMachine: Dict[str, float]
-    pausedSessions: Dict[str, float]
+    #: A stopped session is free: ``{"perHour": 0}``.
+    stoppedSessions: Dict[str, float]
     proxies: Dict[str, float]
     captchaSolving: Dict[str, float]
     #: {"byPlan": {plan: {"includedPerMonth", "extraPer1000Usd"}}}
@@ -1148,7 +1158,8 @@ class Pricing(TypedDict, total=False):
 WebhookEventType = Literal[
     "session.started",
     "session.expiring",
-    "session.ended",
+    "session.stopped",
+    "session.deleted",
     "agent_run.started",
     "agent_run.waiting",
     "agent_run.resumed",
@@ -1420,8 +1431,13 @@ class SessionExpiringEvent(_TypedEvent):
     data: WebhookSessionExpiringData
 
 
-class SessionEndedEvent(_TypedEvent):
-    type: Literal["session.ended"]
+class SessionStoppedEvent(_TypedEvent):
+    type: Literal["session.stopped"]
+    data: Dict[str, Any]
+
+
+class SessionDeletedEvent(_TypedEvent):
+    type: Literal["session.deleted"]
     data: Dict[str, Any]
 
 
@@ -1534,7 +1550,8 @@ class WebhookTestEvent(_TypedEvent):
 WebhookEventPayload = Union[
     SessionStartedEvent,
     SessionExpiringEvent,
-    SessionEndedEvent,
+    SessionStoppedEvent,
+    SessionDeletedEvent,
     AgentRunStartedEvent,
     AgentRunWaitingEvent,
     AgentRunResumedEvent,
