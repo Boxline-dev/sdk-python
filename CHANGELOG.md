@@ -3,7 +3,7 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
-## 3.1.0 (unreleased)
+## 3.1.0 (2026-10-09)
 
 Every run reads as a clear story: what the agent saw, thought and did, what came out, and what it cost. All additions;
 nothing breaks, and it works with the API that serves them (older runs simply lack the new fields). The Node SDK
