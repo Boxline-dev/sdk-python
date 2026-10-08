@@ -799,16 +799,18 @@ class AsyncSessions:
         after: Optional[Union[int, str]] = None,
         limit: Optional[int] = None,
         *,
+        run_id: Optional[str] = None,
         options: Optional[RequestOptions] = None,
     ) -> AsyncPager[t.SessionEvent]:
-        """Console, network, navigation, error, lifecycle, action, exec and captcha events, oldest first. Every shell
-        command is an ``exec`` event, whoever ran it: ``data["by"]`` is ``api``, ``agent`` (with ``data["runId"]``),
-        ``setup`` or ``script``. Iterating stops once caught up; ``page.next_after`` is the ``after`` to poll with later."""
-        return self._c._list(f"/v1/sessions/{seg(session_id)}/events", {"types": as_list(types), "after": after, "limit": limit}, lambda e: e, options)
+        """Console, network, navigation, error, lifecycle, action, exec, files and captcha events, oldest first. Every
+        shell command is an ``exec`` event and every browser action an ``action`` event, whoever ran it: ``data["by"]``
+        is ``api``, ``agent`` (with ``data["runId"]`` and ``data["step"]``), ``setup`` or ``script``. ``run_id`` keeps the
+        events one agent run caused. Iterating stops once caught up; ``page.next_after`` is the ``after`` to poll with later."""
+        return self._c._list(f"/v1/sessions/{seg(session_id)}/events", {"types": as_list(types), "runId": run_id, "after": after, "limit": limit}, lambda e: e, options)
 
-    async def stream_events(self, session_id: str, after: Optional[int] = None, *, options: Optional[RequestOptions] = None) -> AsyncIterator[t.SessionEvent]:
-        """Events as they happen: first the backlog after ``after``, then live, until you stop iterating."""
-        res = await self._c._stream("GET", f"/v1/sessions/{seg(session_id)}/events/stream", params={"after": after}, options=options)
+    async def stream_events(self, session_id: str, after: Optional[int] = None, *, run_id: Optional[str] = None, options: Optional[RequestOptions] = None) -> AsyncIterator[t.SessionEvent]:
+        """Events as they happen: first the backlog after ``after``, then live, until you stop iterating (``run_id``: only one agent run's)."""
+        res = await self._c._stream("GET", f"/v1/sessions/{seg(session_id)}/events/stream", params={"after": after, "runId": run_id}, options=options)
         try:
             async for event in _sse(res.aiter_lines()):
                 yield event  # type: ignore[misc]
@@ -1373,13 +1375,13 @@ class AsyncSession:
 
     # ----- logs and recording
 
-    def events(self, types: Optional[Sequence[str]] = None, after: Optional[Union[int, str]] = None, limit: Optional[int] = None, *, options: Optional[RequestOptions] = None) -> AsyncPager[t.SessionEvent]:
-        """Console, network, navigation, error, lifecycle, action, exec and captcha events (oldest first)."""
-        return self._c.sessions.events(self.id, types, after, limit, options=options)
+    def events(self, types: Optional[Sequence[str]] = None, after: Optional[Union[int, str]] = None, limit: Optional[int] = None, *, run_id: Optional[str] = None, options: Optional[RequestOptions] = None) -> AsyncPager[t.SessionEvent]:
+        """Console, network, navigation, error, lifecycle, action, exec, files and captcha events (oldest first); ``run_id``: one agent run's."""
+        return self._c.sessions.events(self.id, types, after, limit, run_id=run_id, options=options)
 
-    def stream_events(self, after: Optional[int] = None, *, options: Optional[RequestOptions] = None) -> AsyncIterator[t.SessionEvent]:
-        """Events as they happen (the backlog after ``after`` first), until you stop iterating."""
-        return self._c.sessions.stream_events(self.id, after, options=options)
+    def stream_events(self, after: Optional[int] = None, *, run_id: Optional[str] = None, options: Optional[RequestOptions] = None) -> AsyncIterator[t.SessionEvent]:
+        """Events as they happen (the backlog after ``after`` first), until you stop iterating (``run_id``: only one agent run's)."""
+        return self._c.sessions.stream_events(self.id, after, run_id=run_id, options=options)
 
     def pages(self, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> AsyncPager[t.VisitedPage]:
         """Pages visited in this session."""

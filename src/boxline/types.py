@@ -515,15 +515,52 @@ class ExecEventData(TypedDict):
     by: Literal["api", "agent", "setup", "script"]
     #: The agent run that ran it (``by`` is "agent").
     runId: NotRequired[str]
+    #: ``by`` "agent": the run's step number (the step's ``n``); ``by`` "setup": the setup command's number.
+    step: NotRequired[int]
     exitCode: NotRequired[Optional[int]]
+    #: ``by`` "agent": the paths (relative to the workspace) of the files the command created or changed, as on the
+    #: step's ``shell``.
+    files: NotRequired[List[str]]
     #: The names of the credentials the command was given.
     credentials: NotRequired[List[str]]
+
+
+class ActionEventData(TypedDict):
+    """``data`` of an ``action`` event: every browser action, whoever ran it. ``text`` is its result line; a failure has
+    ``level`` "error"."""
+
+    #: The action name (``click``, ``goto``, ``step``, ...).
+    action: str
+    #: ``api`` (the Actions API, computer and MCP browser tools included), ``agent`` (an agent run's browser tools) or
+    #: ``script`` (a playground script's ``step()`` or ``extract()``).
+    by: Literal["api", "agent", "script"]
+    #: ``by`` "agent": the run and its step number (the step's ``n``).
+    runId: NotRequired[str]
+    step: NotRequired[int]
+    #: ``by`` "script": the line of your script that made the call, in the editor's numbers.
+    line: NotRequired[int]
+    #: ``by`` "agent", with a recording: the recording frame the step ended on (the step's ``screen["frame"]``).
+    frame: NotRequired[int]
+    #: A failure's API error code, when it has one (e.g. ``provider_unavailable``, ``feature_not_in_plan``).
+    code: NotRequired[str]
+
+
+class FilesEventData(TypedDict):
+    """``data`` of a ``files`` event: a write, upload or delete through the Files API (not reads; a shell command's
+    changes are on its ``exec`` event)."""
+
+    op: Literal["write", "delete"]
+    #: Relative to the workspace.
+    path: str
+    #: ``op`` "write": the file's size.
+    bytes: NotRequired[int]
+    by: Literal["api"]
 
 
 class SessionEvent(TypedDict):
     seq: int
     at: str
-    type: Literal["console", "network", "navigation", "error", "lifecycle", "action", "exec", "captcha"]
+    type: Literal["console", "network", "navigation", "error", "lifecycle", "action", "exec", "files", "captcha"]
     level: NotRequired[str]
     text: NotRequired[str]
     url: NotRequired[str]
@@ -532,8 +569,9 @@ class SessionEvent(TypedDict):
     resourceType: NotRequired[str]
     durationMs: NotRequired[int]
     tabId: NotRequired[str]
-    #: ``exec`` events: an ``ExecEventData`` (``by``, ``runId``); the other types: a dict of their own facts.
-    data: NotRequired[Union[ExecEventData, Dict[str, Any]]]
+    #: ``exec`` events: an ``ExecEventData``; ``action`` events: an ``ActionEventData``; ``files`` events: a
+    #: ``FilesEventData``; the other types: a dict of their own facts.
+    data: NotRequired[Union[ExecEventData, ActionEventData, FilesEventData, Dict[str, Any]]]
 
 
 class VisitedPage(TypedDict):
@@ -889,6 +927,43 @@ class AgentMessageSent(TypedDict):
     delivered: Literal[False]
 
 
+class StepScreen(TypedDict):
+    """The screen a browser or computer tool step led to (``AgentStep["screen"]``)."""
+
+    #: Its number in the session's recording.
+    frame: NotRequired[int]
+    url: str
+    title: str
+    #: The frame's address: ``GET /v1/sessions/{id}/recording/frames/{frame}`` (an image/jpeg that needs your API key).
+    image: NotRequired[str]
+
+
+class StepFile(TypedDict):
+    path: str
+    bytes: int
+
+
+class StepShell(TypedDict):
+    """What a bash step did to the workspace (``AgentStep["shell"]``)."""
+
+    #: The command's exit code (None when it was stopped).
+    exitCode: Optional[int]
+    #: Files created or changed in the workspace while the command ran: paths relative to the workspace, at most 20, by
+    #: path. Deleted files and changes outside the workspace are not listed. Left out by a machine from before this field.
+    files: NotRequired[List[StepFile]]
+    #: How many more files changed beyond the ones listed.
+    more: NotRequired[int]
+
+
+class StepUsage(TypedDict):
+    """One model reply's cost (``AgentStep["usage"]``)."""
+
+    inputTokens: int
+    outputTokens: int
+    #: None for a model that is not priced.
+    costUsd: Optional[float]
+
+
 class AgentStep(TypedDict):
     #: message: a message you sent (``agent.send_message``), recorded when the model received it.
     #: code: the run waits for a password's 2FA code or sign-in link (``credentials.push_code``, or your ``code_url``);
@@ -903,7 +978,8 @@ class AgentStep(TypedDict):
     #: handover: who paused the run; captcha "solved": who solved it.
     by: NotRequired[Literal["user", "agent", "captcha", "auto", "person"]]
     text: NotRequired[str]
-    #: tool and handover steps: the model's own words with the call (what it is doing and will do next), redacted.
+    #: tool and handover steps: the model's own words with the call (what it is doing and will do next) and, when the
+    #: provider gives it in words, its reasoning (OpenAI's reasoning summaries, Claude's thinking), redacted.
     thought: NotRequired[str]
     name: NotRequired[str]
     #: A tool's input as the model wrote it: variables appear as %name%, never as their values.
@@ -911,6 +987,15 @@ class AgentStep(TypedDict):
     output: NotRequired[str]
     isError: NotRequired[bool]
     ms: NotRequired[int]
+    #: The step's number in the run, from 1; it never changes. A session event's ``data["step"]`` is this number.
+    n: NotRequired[int]
+    #: Browser and computer tool steps: the screen the action led to (for a step the model got a screenshot for, that
+    #: exact image). Without a recording (or while the run works with variables) only ``url`` and ``title``.
+    screen: NotRequired[StepScreen]
+    #: bash steps: how the command ended and the workspace files it created or changed. The output stays in ``output``.
+    shell: NotRequired[StepShell]
+    #: The model reply this step is the first of: its tokens and cost. The steps' tokens add up to the run's ``usage``.
+    usage: NotRequired[StepUsage]
     #: captcha steps: "solving", "waiting" (a person's turn) or "solved"; code steps: "waiting" (a wait began: push the
     #: code or link now), then "received" or "timeout". Never the code or the link.
     state: NotRequired[Literal["solving", "waiting", "solved", "received", "timeout"]]

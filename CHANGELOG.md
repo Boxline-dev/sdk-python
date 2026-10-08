@@ -3,6 +3,30 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
+## 3.1.0 (unreleased)
+
+Every run reads as a clear story: what the agent saw, thought and did, what came out, and what it cost. All additions;
+nothing breaks, and it works with the API that serves them (older runs simply lack the new fields). The Node SDK
+(`@boxline/sdk` 3.1.0) gets the same, with the same names in camelCase.
+
+### Added
+
+- **Agent run steps** (`AgentStep`, from `bx.agent.get` / `wait` and the run's event stream) have new optional keys:
+  `n` (the step's number, from 1, stable), `screen` (`{frame, url, title, image}`: the screen the action led to; for a
+  step the model got a screenshot for it is that exact image, `image` is the recording frame's address), `shell`
+  (`{exitCode, files: [{path, bytes}], more}` of a bash step: the workspace files the command created or changed) and
+  `usage` (`{inputTokens, outputTokens, costUsd}` of the model reply the step is the first of; the steps add up to the
+  run's `usage`). New types `StepScreen`, `StepShell`, `StepFile` and `StepUsage`. `thought` now also holds the
+  model's reasoning when the provider gives it in words (OpenAI's reasoning summaries, Claude's thinking), so computer-use
+  steps have one too. Click steps name what was clicked (`Clicked “Jobs” link at (814, 124)`).
+- **Session events**: a new event type `files` (the Files API's writes and deletes: `{op, path, bytes, by}`), `action`
+  events carry their result line as `text` and `data: {action, by, runId, step, line, frame, code}` (`by`: `api`,
+  `agent` or `script`; `line`: the line of a playground script's `step()` call; `code`: a failure's API error
+  code), and an agent's `exec` event has `data["step"]` and `data["files"]`. New types `ActionEventData` and
+  `FilesEventData`.
+- **`run_id`** on `sessions.events` / `session.events` and `stream_events` (sync and async): only the events one
+  agent run caused in the session, which link to its steps by run id and step number.
+
 ## 3.0.0 (2026-10-07)
 
 The API tree was redesigned for fewer, more predictable calls: one call per job, a change takes the same shape as the create,
