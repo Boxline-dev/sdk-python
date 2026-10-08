@@ -1,5 +1,5 @@
-"""verify_webhook must accept and refuse exactly what the API's reference signer does (apps/api/src/webhooks/signing.ts).
-webhook_vectors.json is made by that signer (tests/helpers/webhook-vectors.ts in the platform repository); the Node
+"""verify_webhook must accept and refuse exactly what the API's own signer does.
+webhook_vectors.json is made by that signer; the Node
 SDK's test checks the same file, and fails when it is stale."""
 
 from __future__ import annotations
@@ -87,12 +87,14 @@ def test_webhooks_and_settings_requests() -> None:
     bx.webhooks.update("wh_1", enabled=False)
     bx.webhooks.update("wh_1", description=None)
     bx.webhooks.delete("wh_1")
-    bx.webhooks.rotate_secret("wh_1")
+    assert bx.webhooks.update("wh_1", rotate_secret=True)["secret"] == "whsec_new"
+    assert not hasattr(bx.webhooks, "rotate_secret")
     bx.webhooks.test("wh_1")
     bx.webhooks.deliveries("wh_1", status="failed", limit=5)
     bx.webhooks.retry_delivery("wh_1", "dlv_1")
     assert bx.project.settings()["captchaDefault"] == "solve"
-    bx.project.set_settings(captcha_default="ask")
+    bx.project.set_settings(captcha_default="ask", trajectories={"enabled": False, "source": "settings"})
+    assert not hasattr(bx.project, "trajectories") and not hasattr(bx.project, "set_trajectories")
     assert [f"{r.method} {r.url.path}{('?' + r.url.query.decode()) if r.url.query else ''}" for r in f.requests] == [
         "POST /v1/webhooks",
         "GET /v1/webhooks?limit=10",
@@ -100,7 +102,7 @@ def test_webhooks_and_settings_requests() -> None:
         "PATCH /v1/webhooks/wh_1",
         "PATCH /v1/webhooks/wh_1",
         "DELETE /v1/webhooks/wh_1",
-        "POST /v1/webhooks/wh_1/rotate-secret",
+        "PATCH /v1/webhooks/wh_1",
         "POST /v1/webhooks/wh_1/test",
         "GET /v1/webhooks/wh_1/deliveries?status=failed&limit=5",
         "POST /v1/webhooks/wh_1/deliveries/dlv_1/retry",
@@ -110,7 +112,8 @@ def test_webhooks_and_settings_requests() -> None:
     assert f.body(0) == {"url": "https://example.com/hook", "events": ["session.stopped"], "description": "ci"}
     assert f.body(3) == {"enabled": False}
     assert f.body(4) == {"description": None}
-    assert f.body(11) == {"captchaDefault": "ask"}
+    assert f.body(6) == {"rotateSecret": True}
+    assert f.body(11) == {"captchaDefault": "ask", "trajectories": {"enabled": False, "source": "settings"}}
 
 
 def test_event_types_samples_and_all_events() -> None:
@@ -120,7 +123,7 @@ def test_event_types_samples_and_all_events() -> None:
     bx.webhooks.test("wh_1", type="agent_run.waiting")
     bx.webhooks.test("wh_1")
     bx.webhooks.create("https://example.com/hook", ["*"])
-    assert [f"{r.method} {r.url.path}" for r in f.requests] == ["GET /v1/webhooks/events", "POST /v1/webhooks/wh_1/test", "POST /v1/webhooks/wh_1/test", "POST /v1/webhooks"]
+    assert [f"{r.method} {r.url.path}" for r in f.requests] == ["GET /v1/webhooks/event-types", "POST /v1/webhooks/wh_1/test", "POST /v1/webhooks/wh_1/test", "POST /v1/webhooks"]
     assert f.body(1) == {"type": "agent_run.waiting"}
     assert f.body(2) is None  # no type: a webhook.test event, as before
     assert f.body(3) == {"url": "https://example.com/hook", "events": ["*"]}

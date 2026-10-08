@@ -4,7 +4,8 @@
     python scripts/unasync.py --check   # exit 1 when _client.py is not what the async source gives
 
 The async file is the only source: one code path, two clients. The rules below remove ``async``/``await`` and rename
-the async-only names; blocks between ``# --- async only ---`` and ``# --- end ---`` are dropped. Keep the source
+the async-only names; blocks between ``# --- async only ---`` and ``# --- end ---`` are dropped. A block between ``# --- sync only ---``
+and ``# --- end ---`` is written as comments in the source (``# code``) and becomes code in the sync file. Keep the source
 to what these rules understand (no ``AsyncGenerator``, no ``anext``), and check the result with the tests.
 """
 
@@ -49,18 +50,27 @@ RULES = [
 def generate(source: str) -> str:
     lines = []
     skipping = False
+    uncommenting = False
     for line in source.splitlines(keepends=True):
         mark = line.strip()
         if mark == "# --- async only ---":
             skipping = True
             continue
-        if skipping:
+        if mark == "# --- sync only ---":
+            uncommenting = True
+            continue
+        if skipping or uncommenting:
             if mark == "# --- end ---":
-                skipping = False
+                skipping = uncommenting = False
+            elif uncommenting:
+                code = re.match(r"^(\s*)#(?: (.*))?$", line.rstrip("\n"))
+                if code is None:
+                    raise SystemExit(f"unasync: a line in a sync-only block is not a comment: {line!r}")
+                lines.append(f"{code.group(1)}{code.group(2) or ''}\n")
             continue
         lines.append(line)
-    if skipping:
-        raise SystemExit("unasync: '# --- async only ---' without '# --- end ---'")
+    if skipping or uncommenting:
+        raise SystemExit("unasync: a '# --- async only ---' or '# --- sync only ---' block without '# --- end ---'")
     text = "".join(lines)
     # The source's module docstring is about the source; the generated file gets its own (added after the renames).
     if text.startswith('"""'):

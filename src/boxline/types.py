@@ -130,6 +130,9 @@ class ProjectSettings(TypedDict):
     captchaDefaultEffective: CaptchaMode
     #: The model used when a request names no provider or model (None: the server default).
     defaultModel: Optional["DefaultModel"]
+    #: The Trajectories program: whether sessions may be used for trajectory datasets, and the notice (see the Terms of
+    #: Service and Privacy Policy).
+    trajectories: "Trajectories"
     updatedAt: Optional[str]
     #: The project's own user who changed it last in the console (None for an API key or support).
     updatedBy: Optional[str]
@@ -162,8 +165,18 @@ class ModelKeys(TypedDict):
 
 class Trajectories(TypedDict):
     enabled: bool
+    #: When the project was shown the notice; until then no session is eligible.
     noticeSeenAt: Optional[str]
+    #: The user who made the last choice (None for an API key).
     decidedBy: Optional[str]
+
+
+class TrajectoriesChange(TypedDict):
+    """What ``project.set_settings(trajectories=...)`` takes: turns the Trajectories program on or off (the choice is
+    logged; ``source`` says where it was made, default "settings")."""
+
+    enabled: bool
+    source: NotRequired[Literal["notice", "settings"]]
 
 
 class MeProject(Project):
@@ -220,6 +233,41 @@ class SessionUsage(TypedDict):
     costUsd: float
 
 
+class SessionSpec(TypedDict, total=False):
+    """The settings of a session, in one dict with the API's names: what ``sessions.create`` takes as arguments (in
+    snake_case), and what ``agent.run`` and ``tasks.create`` take as ``session`` for the session they start.
+    ``browser`` (default True) and ``shell`` (default False) choose the kind: a browser only, a shell only
+    (``{"browser": False, "shell": True}``) or both; a session needs at least one."""
+
+    #: ``False`` for a session without a browser, or ``{"mode": "realistic", "locale": "de-DE", "timezone": "Europe/Berlin"}``.
+    browser: Union[bool, Dict[str, Any]]
+    #: A bash shell with Python, Node, ffmpeg and sudo, sharing /workspace with the browser.
+    shell: bool
+    #: Seconds (default 300 for a session, 1800 for an agent run's or a task run's session), up to the plan's maximum.
+    timeout: int
+    #: Seconds without activity after which it stops, 30 to ``timeout``; None switches it off.
+    idleTimeout: Optional[int]
+    keepAlive: bool
+    viewport: Viewport
+    userMetadata: Dict[str, Any]
+    #: ``{"id": "prof_…", "persist": True}``: start from a profile, and save the logins back into it at the end.
+    profile: Dict[str, Any]
+    recordSession: bool
+    #: Shell commands run at start and again after a resume (needs a shell).
+    setup: List[str]
+    #: A proxy (see ``sessions.create``): ``True``, one proxy dict or a list of rules.
+    proxy: Union[bool, Dict[str, Any], List[Dict[str, Any]]]
+    captcha: CaptchaMode
+    blockAds: bool
+    cookieBanners: Literal["reject", "off"]
+    #: Uploaded extension ids (at most 10).
+    extensions: List[str]
+    #: Variables for the shell (needs a shell). Stored sealed; read back as names only.
+    env: Dict[str, Union[str, int, float, bool]]
+    #: Credentials exported into the shell (needs a shell).
+    credentials: List[str]
+
+
 class SessionData(TypedDict):
     id: str
     status: SessionStatus
@@ -244,8 +292,11 @@ class SessionData(TypedDict):
     #: When it was deleted, and why: "requested" (``sessions.delete``) or "retention" (its ``deletesAt`` passed).
     deletedAt: Optional[str]
     deleteReason: Optional[str]
+    #: The CDP WebSocket for Playwright and Puppeteer; None without a browser, or unless the session is running.
     connectUrl: Optional[str]
+    #: The live view page; None without a browser, or unless the session is running.
     liveUrl: Optional[str]
+    #: The terminal WebSocket; None without a shell, or unless the session is running.
     terminalUrl: Optional[str]
     #: The proxy or proxy rules as given, never with passwords; None without one.
     proxy: Union[None, Dict[str, Any], List[Dict[str, Any]]]
@@ -258,7 +309,6 @@ class SessionData(TypedDict):
     profileId: Optional[str]
     profilePersist: NotRequired[bool]
     userMetadata: Dict[str, Any]
-    moves: int
     checkpointAt: Optional[str]
     recoveries: int
     error: Optional[str]
@@ -281,36 +331,6 @@ class SessionData(TypedDict):
     #: the shell).
     credentials: NotRequired[List[str]]
     usage: SessionUsage
-
-
-class SessionUrls(TypedDict):
-    liveUrl: Optional[str]
-    terminalUrl: Optional[str]
-    connectUrl: Optional[str]
-
-
-class MoveTimings(TypedDict):
-    captureMs: float
-    acquireMs: float
-    restoreMs: float
-    totalMs: float
-
-
-class StoppedProcess(TypedDict):
-    pid: int
-    #: The command line, credential values hidden, at most 200 characters.
-    command: str
-    #: How long it had run.
-    seconds: int
-
-
-class MoveShell(TypedDict):
-    """Sessions with a shell, after a move: where the shell continues and which exported variables came along (the
-    session's env and credentials are set again as well). Running processes do not move; the stopped ones are listed."""
-
-    cwd: str
-    exported: List[str]
-    stoppedProcesses: List[StoppedProcess]
 
 
 class BulkItem(TypedDict):
@@ -418,7 +438,7 @@ class TabList(TypedDict):
 
 
 class ComputerResult(TypedDict):
-    """What POST /v1/sessions/{id}/computer answers: what happened, and the screen after it."""
+    """What POST /v1/sessions/{id}/browser/computer answers: what happened, and the screen after it."""
 
     ok: bool
     #: The provider's action name.
@@ -460,7 +480,8 @@ class ExecExit(TypedDict, total=False):
 
 class FileEntry(TypedDict):
     name: str
-    type: Literal["file", "dir", "other"]
+    #: ``"symlink"``: a link, never followed (it is not downloadable).
+    type: Literal["file", "dir", "symlink", "other"]
     size: int
     mtime: str
 
@@ -475,6 +496,30 @@ class CookieFile(TypedDict):
     count: int
 
 
+class CaptchaChange(TypedDict):
+    """What ``session.on_captcha`` hands its function: a CAPTCHA started waiting for a person (``"detected"``) or is gone
+    (``"cleared"``), its kind, the page's address and the session's ``captcha`` event."""
+
+    state: Literal["detected", "cleared"]
+    kind: CaptchaKind
+    url: str
+    event: "SessionEvent"
+
+
+class ExecEventData(TypedDict):
+    """``data`` of an ``exec`` event: every shell command in the session, whoever ran it. ``text`` is the command with
+    credential values hidden; the output stays with whoever ran it: the API caller, or the run's steps."""
+
+    #: ``api`` (``sessions.exec``), ``agent`` (an agent run's bash; ``runId`` is the run), ``setup`` (a ``setup``
+    #: command) or ``script`` (a Playwright script's run).
+    by: Literal["api", "agent", "setup", "script"]
+    #: The agent run that ran it (``by`` is "agent").
+    runId: NotRequired[str]
+    exitCode: NotRequired[Optional[int]]
+    #: The names of the credentials the command was given.
+    credentials: NotRequired[List[str]]
+
+
 class SessionEvent(TypedDict):
     seq: int
     at: str
@@ -487,7 +532,8 @@ class SessionEvent(TypedDict):
     resourceType: NotRequired[str]
     durationMs: NotRequired[int]
     tabId: NotRequired[str]
-    data: NotRequired[Dict[str, Any]]
+    #: ``exec`` events: an ``ExecEventData`` (``by``, ``runId``); the other types: a dict of their own facts.
+    data: NotRequired[Union[ExecEventData, Dict[str, Any]]]
 
 
 class VisitedPage(TypedDict):
@@ -593,19 +639,13 @@ Credential = Union[PasswordCredential, SecretCredential]
 class PasswordCredentialWritten(PasswordCredential, total=False):
     """A password as ``credentials.create`` and ``credentials.update`` return it: when ``code_url`` was set or changed it
     also has ``codeUrlSecret`` (``whsec_…``), the key that signs the platform's requests to ``code_url``, shown this
-    once (a new one any time with ``credentials.rotate_code_url_secret``)."""
+    once (a new one any time with ``credentials.update(name, rotate_code_url_secret=True)``)."""
 
     codeUrlSecret: str
 
 
 #: A credential as ``credentials.create`` and ``credentials.update`` return it.
 CredentialWritten = Union[PasswordCredentialWritten, SecretCredential]
-
-
-class CodeUrlSecret(TypedDict):
-    """What ``credentials.rotate_code_url_secret`` returns."""
-
-    codeUrlSecret: str
 
 
 class CredentialCodeAccepted(TypedDict):
@@ -812,8 +852,8 @@ SessionStopReason = Literal[
 #: Why a session was deleted: "requested" (``sessions.delete``) or "retention" (its ``deletesAt`` passed).
 SessionDeleteReason = Literal["requested", "retention"]
 
-#: A run's ``errorCode``. The first four are limits: the run stopped without finishing and can be continued
-#: (``agent.continue_run``) while ``continuable`` is set, and so can "server_restarted" (the API server running it stopped
+#: A run's ``errorCode``. The first four are limits: the run stopped without finishing and can be resumed
+#: (``agent.resume``) while ``resumable`` is set, and so can "server_restarted" (the API server running it stopped
 #: while its session went on). "session_timeout": its session reached its time limit;
 #: "session_ended": its session stopped another way (``error`` names how); "output_invalid": the answer did not match the
 #: output schema; "internal": an error on the platform's side. Other codes are those of the platform error that stopped it.
@@ -836,8 +876,8 @@ class AgentRunStarted(TypedDict):
     mode: NotRequired[AgentMode]
 
 
-class Continuable(TypedDict):
-    #: Until when ``agent.continue_run`` can carry the run on (its own session is kept that long).
+class Resumable(TypedDict):
+    #: Until when ``agent.resume`` can carry the run on (its own session is kept that long).
     until: str
 
 
@@ -853,7 +893,7 @@ class AgentStep(TypedDict):
     #: message: a message you sent (``agent.send_message``), recorded when the model received it.
     #: code: the run waits for a password's 2FA code or sign-in link (``credentials.push_code``, or your ``code_url``);
     #: see ``state``.
-    type: Literal["text", "tool", "handover", "handback", "captcha", "message", "code"]
+    type: Literal["text", "tool", "handover", "resume", "captcha", "message", "code"]
     at: str
     #: message steps: its id and when it was sent (``at`` is when the model got it); they also carry ``"from": "user"``
     #: (a key a TypedDict cannot name).
@@ -921,12 +961,9 @@ class AgentRun(TypedDict):
     error: Optional[str]
     #: See AgentRunErrorCode ("max_steps", "output_invalid", …).
     errorCode: NotRequired[Optional[str]]
-    #: Set while the run can be continued (``agent.continue_run``); None otherwise.
-    continuable: NotRequired[Optional[Continuable]]
-    #: The run this one continues, and the run that continued this one.
-    continuedFrom: NotRequired[Optional[str]]
-    continuedBy: NotRequired[Optional[str]]
-    #: The names of the run's own variables (never values): continue_run needs their values again.
+    #: Set while the run can be resumed (``agent.resume``): it stopped early (a limit, or a server restart); None otherwise.
+    resumable: NotRequired[Optional[Resumable]]
+    #: The names of the run's own variables (never values): ``agent.resume`` needs their values again.
     variableNames: NotRequired[List[str]]
     usage: AgentUsage
     handover: Optional[Handover]
@@ -939,7 +976,7 @@ class AgentRun(TypedDict):
 
 #: One event of an agent run's live stream (Agent.stream): a step, or ``{"type": "thought" | "status" | "exec" | "output" |
 #: "done", …}``; ``thought`` (``text``, ``at``) comes as soon as the model's reply arrives, before its tool runs. ``done``
-#: carries ``status``, ``result`` (JSON with an output schema), ``resultText``, ``error``, ``errorCode`` and ``continuable``.
+#: carries ``status``, ``result`` (JSON with an output schema), ``resultText``, ``error``, ``errorCode`` and ``resumable``.
 AgentRunEvent = Dict[str, Any]
 
 
@@ -992,13 +1029,8 @@ class TaskLastRun(TypedDict):
     finishedAt: Optional[str]
 
 
-class TaskProfile(TypedDict):
-    id: str
-    persist: bool
-
-
 class Task(TypedDict):
-    """A task as stored: secret variables without values, ``browser.proxy`` without its password."""
+    """A task as stored: secret variables without values, ``session.env`` as names, ``session.proxy`` without its password."""
 
     id: str
     name: str
@@ -1007,10 +1039,11 @@ class Task(TypedDict):
     #: Names of the credentials its runs get as placeholders (never values).
     credentials: List[str]
     output: Optional[OutputSchema]
-    #: The settings of each run's own session (``shell``, ``proxy``, ``captcha``, ``mode``, ``locale``, ``timezone``,
-    #: ``viewport``, ``timeout``, ``idleTimeout``, ``blockAds``, ``cookieBanners``, ``extensions``, ``allowWithExtensions``).
-    browser: Optional[Dict[str, Any]]
-    profile: Optional[TaskProfile]
+    #: The settings of each run's own session, a ``SessionSpec`` (``browser``, ``shell``, ``timeout``, ``proxy``,
+    #: ``captcha``, ``profile``, ``blockAds``, ``extensions``, …) with ``env`` as a list of names, or None for the defaults.
+    session: Optional[Dict[str, Any]]
+    #: Needed for a task with secret variables or credentials and a session with extensions.
+    allowWithExtensions: NotRequired[bool]
     #: ``{"provider", "model"}``, or None for the server's default.
     model: Optional[Dict[str, str]]
     #: None: no step limit (a task saved without one shows 30).
@@ -1089,8 +1122,13 @@ class SearchUsage(TypedDict):
 
 class UsageDay(TypedDict):
     date: str
+    sessions: int
     seconds: float
     costUsd: float
+    agentRuns: int
+    #: Model cost on the platform's keys; runs on the project's own keys are in ownKeyModelCostUsd.
+    modelCostUsd: float
+    ownKeyModelCostUsd: float
 
 
 Usage = TypedDict(
@@ -1100,6 +1138,10 @@ Usage = TypedDict(
         "to": str,
         "sessions": int,
         "running": int,
+        "concurrencyLimit": int,
+        "agentRuns": int,
+        "modelCostUsd": float,
+        "ownKeyModelCostUsd": float,
         "browserSeconds": float,
         "sandboxVcpuSeconds": float,
         "sandboxGibSeconds": float,
@@ -1110,28 +1152,6 @@ Usage = TypedDict(
         "byDay": List[UsageDay],
     },
 )
-
-
-class StatsDay(TypedDict):
-    sessions: int
-    browserSeconds: float
-    costUsd: float
-    agentRuns: int
-    #: Model cost on the platform's keys; runs on the project's own keys are in ownKeyModelCostUsd.
-    modelCostUsd: float
-    ownKeyModelCostUsd: float
-
-
-class StatsByDay(StatsDay):
-    date: str
-
-
-class Stats(TypedDict):
-    days: int
-    running: int
-    concurrencyLimit: int
-    totals: StatsDay
-    byDay: List[StatsByDay]
 
 
 class Pricing(TypedDict, total=False):
@@ -1286,7 +1306,6 @@ class WebhookAgentRunStartedData(TypedDict):
     provider: Provider
     model: str
     mode: Literal["tools", "computer"]
-    continuedFrom: Optional[str]
     taskId: Optional[str]
     taskRunId: Optional[str]
     createdAt: str
@@ -1297,11 +1316,11 @@ class WebhookAgentRunWaitingData(TypedDict):
     id: str
     sessionId: Optional[str]
     state: Literal["waiting"]
-    #: "agent": it asked for help; "user": someone took over; "captcha": a CAPTCHA needs a person.
+    #: "agent": it asked for help; "user": a person paused it; "captcha": a CAPTCHA needs a person.
     by: Literal["agent", "user", "captcha"]
     #: At most 500 characters, variables as their %name%.
     reason: Optional[str]
-    #: The run in the console (a login is needed). The signed live view is never sent: get it with sessions.live().
+    #: The run in the console (a login is needed). The signed live view is never sent: get it with sessions.get().
     consoleUrl: str
     since: str
 
@@ -1310,10 +1329,11 @@ class WebhookAgentRunResumedData(TypedDict):
     id: str
     sessionId: Optional[str]
     state: Literal["resumed"]
-    #: What it waited for, as in agent_run.waiting.
-    by: Literal["agent", "user", "captcha"]
-    #: "handback", "message" (a message answered its request for help) or "solved" (the CAPTCHA).
-    via: Literal["handback", "message", "solved"]
+    #: What it waited for, as in agent_run.waiting; "limit": it stopped early (steps, cost, errors, a restart) and was resumed.
+    by: Literal["agent", "user", "captcha", "limit"]
+    #: "resume" (a person resumed a paused run, or a run that stopped early was resumed), "message" (a message answered
+    #: its request for help) or "solved" (the CAPTCHA was solved or went away).
+    via: Literal["resume", "message", "solved"]
     at: str
 
 

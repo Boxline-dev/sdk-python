@@ -49,7 +49,7 @@ def test_headers_api_key_version_and_json_only_with_a_body() -> None:
     bx.profiles.update("prof_1", name="n")
     get, patch = f.requests
     assert get.headers["x-api-key"] == "bxl_test"
-    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/2.0.0"
+    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/3.0.0"
     assert "content-type" not in get.headers
     assert get.url.path == "/healthz"
     assert patch.headers["content-type"] == "application/json"
@@ -160,7 +160,7 @@ def test_keys_on_exactly_the_create_routes() -> None:
     bx.sessions.create()
     bx.sessions.bulk("stop", [SESSION_ID])
     bx.agent.run("t")
-    bx.agent.continue_run("run_1", max_steps=None)
+    bx.agent.resume("run_1", max_steps=None)
     bx.agent.send_message("run_1", "hi")
     bx.crawl.start("https://example.com")
     bx.api_keys.create("k")
@@ -168,7 +168,7 @@ def test_keys_on_exactly_the_create_routes() -> None:
     bx.extensions.upload(b"\x01")
     bx.tasks.create("n", "i")
     bx.tasks.run("task_1")
-    bx.sessions.extend(SESSION_ID, 60)
+    bx.sessions.update(SESSION_ID, timeout=600)
     bx.sessions.actions(SESSION_ID, {"action": "back"})
     bx.extensions.delete("ext_1")
     bx.tasks.update("task_1", name="m")
@@ -178,10 +178,10 @@ def test_keys_on_exactly_the_create_routes() -> None:
         "/v1/sessions",
         "/v1/sessions/bulk",
         "/v1/agent/runs",
-        "/v1/agent/runs/run_1/continue",
+        "/v1/agent/runs/run_1/resume",
         "/v1/agent/runs/run_1/messages",
-        "/v1/crawl",
-        "/v1/api-keys",
+        "/v1/crawls",
+        "/v1/project/api-keys",
         "/v1/profiles",
         "/v1/extensions",
         "/v1/tasks",
@@ -190,7 +190,7 @@ def test_keys_on_exactly_the_create_routes() -> None:
 
     def pattern(p: str) -> str:
         p = re.sub(r"^/v1/tasks/[^/]+/runs$", "/v1/tasks/:id/runs", p)
-        return re.sub(r"^/v1/agent/runs/[^/]+/(continue|messages)$", r"/v1/agent/runs/:id/\1", p)
+        return re.sub(r"^/v1/agent/runs/[^/]+/(resume|messages)$", r"/v1/agent/runs/:id/\1", p)
 
     assert {pattern(p) for p in with_key} == set(boxline.IDEMPOTENT_POSTS)
 
@@ -199,12 +199,12 @@ def test_optional_limits_send_null_only_when_asked() -> None:
     f = Fake(reply({"id": "run_1", "status": "running"}, 201))
     bx = f.sync()
     bx.agent.run("t")  # not passed: the API's default (30 steps)
-    bx.agent.run("t", max_steps=None, max_cost_usd=0.5, timeout=600, idle_timeout=120, max_consecutive_errors=3)
-    bx.agent.continue_run("run_1")
-    bx.agent.continue_run("run_1", max_steps=None, max_cost_usd=None, variables={"pw": "x"})
+    bx.agent.run("t", max_steps=None, max_cost_usd=0.5, session={"timeout": 600, "idleTimeout": 120}, max_consecutive_errors=3)
+    bx.agent.resume("run_1")
+    bx.agent.resume("run_1", max_steps=None, max_cost_usd=None, variables={"pw": "x"})
     bodies = [json.loads(r.content) for r in f.requests]
     assert "maxSteps" not in bodies[0]
-    assert bodies[1] == {"task": "t", "maxSteps": None, "maxCostUsd": 0.5, "timeout": 600, "idleTimeout": 120, "maxConsecutiveErrors": 3}
+    assert bodies[1] == {"task": "t", "session": {"timeout": 600, "idleTimeout": 120}, "maxSteps": None, "maxCostUsd": 0.5, "maxConsecutiveErrors": 3}
     assert bodies[2] == {}
     assert bodies[3] == {"maxSteps": None, "maxCostUsd": None, "variables": {"pw": "x"}}
 
@@ -212,7 +212,7 @@ def test_optional_limits_send_null_only_when_asked() -> None:
 def test_id_in_an_idempotent_route_is_one_non_empty_segment() -> None:
     assert boxline.is_idempotent_post("/v1/tasks/task_1/runs")
     assert boxline.is_idempotent_post("/v1/tasks/task%2F1/runs")
-    for route in ("/v1/tasks//runs", "/v1/tasks/a/b/runs", "/v1/tasks/task_1", "/v1/tasks/task_1/runs/x", "/v1/sessions/s1/extend"):
+    for route in ("/v1/tasks//runs", "/v1/tasks/a/b/runs", "/v1/tasks/task_1", "/v1/tasks/task_1/runs/x", "/v1/sessions/s1/stop", "/v1/agent/runs/run_1/pause"):
         assert not boxline.is_idempotent_post(route), route
 
 
@@ -358,7 +358,7 @@ def test_failed_steps_raise_captcha_timeout_or_action_errors() -> None:
 def pages(request: httpx.Request) -> httpx.Response:
     after = request.url.params.get("after")
     page = 1 if after is None else int(after[1:])
-    return reply({"data": [session(f"{page}-{i}") for i in (1, 2)], "total": 6, "limit": 2, "offset": 0, "next": f"c{page + 1}" if page < 3 else None})
+    return reply({"data": [session(f"{page}-{i}") for i in (1, 2)], "total": 6, "limit": 2, "next": f"c{page + 1}" if page < 3 else None})
 
 
 def test_list_returns_the_first_page_and_iterates_every_item() -> None:
@@ -462,30 +462,30 @@ def test_session_event_stream() -> None:
 def test_session_objects_delegate_and_stay_fresh() -> None:
     f = Fake(
         reply(session()),
-        reply({"liveUrl": "http://live/2", "terminalUrl": None, "connectUrl": "ws://connect/2"}),
         reply(session(status="STOPPED")),
         reply(session(status="RUNNING")),
-        reply({"session": session(status="RUNNING"), "timings": {"captureMs": 1, "acquireMs": 2, "restoreMs": 3, "totalMs": 6}}),
+        reply(session(status="RUNNING", timeout=600, connectUrl="ws://connect/2", liveUrl="http://live/2")),
         reply(session(status="STOPPED")),
     )
     bx = f.sync()
     with bx.sessions.get(SESSION_ID) as s:
-        assert s.live()["connectUrl"] == "ws://connect/2" and s.connect_url == "ws://connect/2"
         s.stop()
         assert s.status == "STOPPED"
         s.resume()
         assert s.status == "RUNNING"
-        assert s.move()["totalMs"] == 6 and s.status == "RUNNING"
+        # One call changes a running session: a length, a new proxy IP, new signed URLs; the answer refreshes the handle.
+        s.update(timeout=600, rotate_proxy=True, rotate_urls=True)
+        assert s.data["timeout"] == 600 and s.connect_url == "ws://connect/2" and s.live_url == "http://live/2"
         assert s.workspace_path == "/workspace" and s.terminal_url is None
     assert s.status == "STOPPED"  # leaving the block stopped it
     assert [f"{r.method} {r.url.path}" for r in f.requests] == [
         f"GET /v1/sessions/{SESSION_ID}",
-        f"GET /v1/sessions/{SESSION_ID}/live",
         f"POST /v1/sessions/{SESSION_ID}/stop",
         f"POST /v1/sessions/{SESSION_ID}/resume",
-        f"POST /v1/sessions/{SESSION_ID}/move",
+        f"PATCH /v1/sessions/{SESSION_ID}",
         f"POST /v1/sessions/{SESSION_ID}/stop",
     ]
+    assert f.body(3) == {"timeout": 600, "rotateProxy": True, "rotateUrls": True}
 
 
 def test_select_elements_and_proxy_removal() -> None:
@@ -498,7 +498,7 @@ def test_select_elements_and_proxy_removal() -> None:
     s = f.sync().sessions.get(SESSION_ID)
     s.select("#country", "Germany")
     assert s.elements()["count"] == 1
-    s.set_proxy(None)
+    s.update(proxy=None)
     assert f.body(1) == {"actions": [{"action": "select", "selector": "#country", "option": "Germany"}]}
     assert f.body(2) == {"actions": [{"action": "elements"}]}
     assert f.body(3) == {"proxy": None}
@@ -521,7 +521,7 @@ def test_async_retries_keys_and_errors(no_sleep: List[float]) -> None:
             assert isinstance(s, boxline.AsyncSession) and s.id == SESSION_ID
             keys = {r.headers["idempotency-key"] for r in f.requests}
             assert len(f.requests) == 3 and len(keys) == 1
-            assert f.requests[0].headers["boxline-sdk"] == "python/2.0.0"
+            assert f.requests[0].headers["boxline-sdk"] == "python/3.0.0"
         g = Fake(api_error(404, "not_found", {"x-client-request-id": "c1"}, "req_1"))
         with pytest.raises(boxline.NotFoundError) as e:
             await g.async_().sessions.get("x", options={"client_request_id": "c1"})
@@ -656,7 +656,7 @@ def test_computer_action() -> None:
     s = f.sync().sessions.get(SESSION_ID)
     assert s.computer({"action": "left_click", "coordinate": [512, 300]}, max_width=1024) == screen
     s.computer({"type": "keypress", "keys": ["CTRL", "A"]}, screenshot=False)
-    assert f.requests[1].url.path == f"/v1/sessions/{SESSION_ID}/computer"
+    assert f.requests[1].url.path == f"/v1/sessions/{SESSION_ID}/browser/computer"
     assert f.body(1) == {"action": "left_click", "coordinate": [512, 300], "maxWidth": 1024}
     assert f.body(2) == {"type": "keypress", "keys": ["CTRL", "A"], "screenshot": False}
     bad = Fake(api_error(400, "out_of_viewport"))

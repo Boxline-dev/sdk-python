@@ -202,7 +202,7 @@ def test_a_refused_type_action_raises_the_error_its_code_names() -> None:
 
 def test_env_and_credentials_on_sessions_and_exec() -> None:
     def answer(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/exec"):
+        if request.url.path.endswith("/shell/exec"):
             if b'"stream":true' in request.content:
                 return reply(content=b'{"type":"stdout","data":"%API_KEY%\\n"}\n{"type":"exit","exitCode":0}\n')
             return reply({"stdout": "%API_KEY%\n", "stderr": "", "exitCode": 0, "timedOut": False, "durationMs": 1})
@@ -226,12 +226,12 @@ def test_env_and_credentials_on_sessions_and_exec() -> None:
 def test_credentials_on_steps_scripts_agent_runs_and_tasks() -> None:
     def answer(request: httpx.Request) -> httpx.Response:
         p = request.url.path
-        if p.endswith("/scripts/run"):
+        if p.endswith("/browser/script"):
             return reply(content=b'{"type":"exit","exitCode":0}\n')
-        if p.endswith("/actions"):
+        if p.endswith("/browser/actions"):
             return reply({"results": [{"ok": True, "action": "step", "value": {"method": "fill"}, "ms": 1}]})
         if p.startswith("/v1/tasks"):
-            return reply({"id": "task_1", "name": "n", "instruction": "i", "variables": [], "credentials": ["SHOP"], "profile": None}, 201 if request.method == "POST" else 200)
+            return reply({"id": "task_1", "name": "n", "instruction": "i", "variables": [], "credentials": ["SHOP"], "session": None}, 201 if request.method == "POST" else 200)
         if p == "/v1/agent/runs":
             return reply({"id": "run_1", "status": "running", "sessionId": "s1", "provider": "openai", "model": "m", "mode": "tools"}, 201)
         return reply(session())
@@ -244,8 +244,8 @@ def test_credentials_on_steps_scripts_agent_runs_and_tasks() -> None:
             await aw(s.step("type %SHOP.password% into the password field", credentials=["SHOP"], allow_with_extensions=True))
             proc = await aw(s.run_script("await step('sign in')", credentials=["SHOP"], allow_with_extensions=True))
             await aw(proc.wait())
-            await aw(bx.agent.run("sign in", credentials=["SHOP", "GITHUB_TOKEN"], profile="prof_1", allow_with_extensions=True))
-            await aw(bx.agent.run("sign in", profile={"id": "prof_1", "persist": True}))
+            await aw(bx.agent.run("sign in", credentials=["SHOP", "GITHUB_TOKEN"], session={"profile": {"id": "prof_1"}}, allow_with_extensions=True))
+            await aw(bx.agent.run("sign in", session={"profile": {"id": "prof_1", "persist": True}}))
             await aw(bx.tasks.create("n", "i", credentials=("SHOP",)))
             await aw(bx.tasks.update("task_1", credentials=None))
 
@@ -258,17 +258,10 @@ def test_credentials_on_steps_scripts_agent_runs_and_tasks() -> None:
         asyncio.run(calls(f.sync(), plain) if flavour == "sync" else calls(f.async_(), awaited))
         assert f.body(1) == {"actions": [{"action": "step", "instruction": "type %SHOP.password% into the password field", "credentials": ["SHOP"], "allowWithExtensions": True}]}, flavour
         assert f.body(2) == {"code": "await step('sign in')", "credentials": ["SHOP"], "allowWithExtensions": True}
-        assert f.body(3) == {"task": "sign in", "credentials": ["SHOP", "GITHUB_TOKEN"], "profile": {"id": "prof_1"}, "allowWithExtensions": True}
-        assert f.body(4) == {"task": "sign in", "profile": {"id": "prof_1", "persist": True}}
+        assert f.body(3) == {"task": "sign in", "credentials": ["SHOP", "GITHUB_TOKEN"], "session": {"profile": {"id": "prof_1"}}, "allowWithExtensions": True}
+        assert f.body(4) == {"task": "sign in", "session": {"profile": {"id": "prof_1", "persist": True}}}
         assert f.body(5) == {"name": "n", "instruction": "i", "credentials": ["SHOP"]}
         assert f.body(6) == {"credentials": None}
-
-
-def test_move_returns_where_the_shell_continues() -> None:
-    shell = {"cwd": "/workspace/project", "exported": ["NODE_ENV"], "stoppedProcesses": [{"pid": 42, "command": "npm run dev", "seconds": 90}]}
-    timings = {"captureMs": 1, "acquireMs": 2, "restoreMs": 3, "totalMs": 6}
-    assert Fake(reply({"session": session(), "timings": timings, "shell": shell})).sync().sessions.move(SESSION_ID)["shell"] == shell
-    assert Fake(reply({"session": session(), "timings": timings})).sync().sessions.move(SESSION_ID)["shell"] is None
 
 
 def test_credential_error_codes() -> None:
@@ -360,10 +353,13 @@ def test_push_code_sends_a_code_or_a_link_never_in_the_url_and_is_not_retried() 
         Fake(api_error(404, "credential_not_found")).sync().credentials.push_code("NOPE", code=CODE)
 
 
-def test_rotate_code_url_secret_and_a_refused_code_url() -> None:
-    f = Fake(reply({"codeUrlSecret": "whsec_new"}))
-    assert f.sync().credentials.rotate_code_url_secret("SHOP") == {"codeUrlSecret": "whsec_new"}
-    assert seen(f) == ["POST /v1/credentials/SHOP/code-url-secret"]
+def test_update_with_rotate_code_url_secret_makes_a_new_secret_and_a_refused_code_url() -> None:
+    f = Fake(reply({"name": "SHOP", "type": "password", "codeUrlSecret": "whsec_new"}))
+    bx = f.sync()
+    assert bx.credentials.update("SHOP", rotate_code_url_secret=True)["codeUrlSecret"] == "whsec_new"
+    assert seen(f) == ["PATCH /v1/credentials/SHOP"]
+    assert f.body(0) == {"rotateCodeUrlSecret": True}
+    assert not hasattr(bx.credentials, "rotate_code_url_secret")
     with pytest.raises(boxline.CodeUrlNotAllowedError) as e:
         Fake(api_error(400, "code_url_not_allowed")).sync().credentials.create(
             "SHOP", "password", origins=["https://shop.example.com"], username="u", password="p", code_source="url", code_url="https://127.0.0.1/x"
@@ -377,11 +373,12 @@ def test_async_push_code_and_rotate() -> None:
     async def go() -> Any:
         abx = f.async_()
         await abx.credentials.push_code("SHOP", link=LINK)
-        return await abx.credentials.rotate_code_url_secret("SHOP")
+        return await abx.credentials.update("SHOP", rotate_code_url_secret=True)
 
     asyncio.run(go())
-    assert seen(f) == ["POST /v1/credentials/SHOP/codes", "POST /v1/credentials/SHOP/code-url-secret"]
+    assert seen(f) == ["POST /v1/credentials/SHOP/codes", "PATCH /v1/credentials/SHOP"]
     assert f.body(0) == {"link": LINK}
+    assert f.body(1) == {"rotateCodeUrlSecret": True}
 
 
 def test_session_login_sends_the_login_action_and_failures_raise_their_codes() -> None:

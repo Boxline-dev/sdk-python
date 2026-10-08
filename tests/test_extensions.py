@@ -91,7 +91,7 @@ def test_browser_settings_on_sessions_agent_runs_and_quick_apis() -> None:
     bx = f.sync()
     bx.sessions.create(browser=True, block_ads=True, cookie_banners="off", extensions=["ext_1"])
     bx.sessions.update(SESSION_ID, block_ads=False, cookie_banners="reject")
-    bx.agent.run("t", block_ads=True, cookie_banners="off", extensions=["ext_1"], allow_with_extensions=True, variables={"a": "b"})
+    bx.agent.run("t", session={"blockAds": True, "cookieBanners": "off", "extensions": ["ext_1"]}, allow_with_extensions=True, variables={"a": "b"})
     bx.fetch("https://example.com", block_ads=True)
     bx.screenshot("https://example.com", block_ads=True)
     bx.pdf("https://example.com", block_ads=True)
@@ -102,7 +102,7 @@ def test_browser_settings_on_sessions_agent_runs_and_quick_apis() -> None:
     bodies: List[Any] = [f.body(i) for i in range(len(f.requests))]
     assert {"blockAds": True, "cookieBanners": "off", "extensions": ["ext_1"]}.items() <= bodies[0].items()
     assert bodies[1] == {"blockAds": False, "cookieBanners": "reject"}
-    assert {"blockAds": True, "cookieBanners": "off", "extensions": ["ext_1"], "allowWithExtensions": True}.items() <= bodies[2].items()
+    assert bodies[2]["session"] == {"blockAds": True, "cookieBanners": "off", "extensions": ["ext_1"]} and bodies[2]["allowWithExtensions"] is True
     for b in bodies[3:8]:
         assert b["blockAds"] is True
     assert bodies[9] == {"blockAds": True, "cookieBanners": "off"}

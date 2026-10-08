@@ -59,24 +59,24 @@ class ErrorCode:
     #: An agent or task run's errorCode (never an HTTP error): the answer did not match the run's output schema after
     #: the repair try (the run's ``error`` lists the problems).
     OUTPUT_INVALID = "output_invalid"
-    #: Agent-run errorCodes (never HTTP errors) for a run that stopped at one of its limits and can be continued
-    #: (``agent.continue_run``) while its ``continuable`` is set: its max_steps, its max_cost_usd, max_consecutive_errors
+    #: Agent-run errorCodes (never HTTP errors) for a run that stopped at one of its limits and can be resumed
+    #: (``agent.resume``) while its ``resumable`` is set: its max_steps, its max_cost_usd, max_consecutive_errors
     #: tool errors in a row, or the same call with the same result 5 times in a row.
     MAX_STEPS = "max_steps"
     MAX_COST = "max_cost"
     TOO_MANY_ERRORS = "too_many_errors"
     NO_PROGRESS = "no_progress"
-    #: Agent-run errorCode (continuable like the limits): the API server running the loop stopped (a restart, a deploy)
-    #: while its session went on; ``agent.continue_run`` picks it up in the same browser.
+    #: Agent-run errorCode (resumable like the limits): the API server running the loop stopped (a restart, a deploy)
+    #: while its session went on; ``agent.resume`` picks it up in the same session.
     SERVER_RESTARTED = "server_restarted"
-    #: Agent-run errorCodes: its session reached its time limit, or ended another way, while it worked (not continuable).
+    #: Agent-run errorCodes: its session reached its time limit, or ended another way, while it worked (not resumable).
     SESSION_TIMEOUT = "session_timeout"
     SESSION_ENDED = "session_ended"
-    #: 409: continue_run on a run that did not stop at a limit, was continued already, or whose window passed.
-    NOT_CONTINUABLE = "not_continuable"
+    #: 409: ``agent.resume`` on a run that is neither paused nor stopped early (``resumable``), or whose window passed.
+    NOT_RESUMABLE = "not_resumable"
     #: 409: send_message after 50 messages to one run.
     TOO_MANY_MESSAGES = "too_many_messages"
-    #: 409: takeover, hand_back or send_message on a run whose server stopped (continue it instead).
+    #: 409: pause, resume or send_message on a run whose server stopped (resume it once it shows as failed with ``server_restarted``).
     RUN_NOT_LIVE = "run_not_live"
     #: 400: ``project.set_model_key`` when the provider does not accept the key (nothing is saved).
     INVALID_MODEL_KEY = "invalid_model_key"
@@ -88,8 +88,23 @@ class ErrorCode:
     PROFILE_TOO_LARGE = "profile_too_large"
     #: 409: the session is not running (it stopped or was deleted): a call on it, an agent run in a deleted one.
     SESSION_NOT_RUNNING = "session_not_running"
-    #: 409: ``sessions.resume`` when nothing was saved (a machine lost before its first checkpoint, a session from before stop and resume).
+    #: 409: ``sessions.resume``, or reading a stopped session's files or a folder archive, when nothing was saved (a machine
+    #: lost before its first checkpoint, a session from before stop and resume).
     NOTHING_SAVED = "nothing_saved"
+    #: 409: a browser call (actions, computer, script, export_cookies) on a session created with ``browser=False``.
+    BROWSER_DISABLED = "browser_disabled"
+    #: 409: a shell call (exec, restart_shell, script) on a session created without ``shell=True``.
+    SHELL_DISABLED = "shell_disabled"
+    #: 400: ``sessions.update`` with a field that is fixed when the session is created (the message names it).
+    NOT_UPDATABLE = "not_updatable"
+    #: 413: ``files.archive`` of a folder over 1 GiB or 100,000 entries (checked before any byte is sent).
+    ARCHIVE_TOO_LARGE = "archive_too_large"
+    #: 429: ``files.archive`` with two archives already being made for the session.
+    ARCHIVE_BUSY = "archive_busy"
+    #: 400 or 403: a file path outside the workspace, or through a link.
+    INVALID_PATH = "invalid_path"
+    #: 400: ``files.archive`` of a path that is a file.
+    NOT_A_DIRECTORY = "not_a_directory"
     #: 409: ``sessions.resume`` on a deleted session.
     SESSION_NOT_STOPPED = "session_not_stopped"
     UNAUTHORIZED = "unauthorized"
@@ -318,9 +333,9 @@ class MachineTooOldError(BoxlineError):
     take ``env`` or ``credentials``; start a new session."""
 
 
-class NotContinuableError(BoxlineError):
-    """409 ``not_continuable``: ``agent.continue_run`` on a run that did not stop at one of its limits, was already
-    continued (the message names the run that did), or whose continue window has passed."""
+class NotResumableError(BoxlineError):
+    """409 ``not_resumable``: ``agent.resume`` on a run that is neither paused nor stopped early (``resumable``): it is
+    running, completed, canceled, failed for another reason, or its resume window has passed (the message says which)."""
 
 
 class TooManyMessagesError(BoxlineError):
@@ -328,8 +343,8 @@ class TooManyMessagesError(BoxlineError):
 
 
 class RunNotLiveError(BoxlineError):
-    """409 ``run_not_live``: ``agent.takeover``, ``hand_back`` or ``send_message`` on a run whose API server stopped (a
-    restart, a deploy): no loop is left to act on it. Continue it (``agent.continue_run``) once it shows as failed with
+    """409 ``run_not_live``: ``agent.pause``, ``resume`` or ``send_message`` on a run whose API server stopped (a
+    restart, a deploy): no loop is left to act on it. Resume it (``agent.resume``) once it shows as failed with
     ``server_restarted``."""
 
 
@@ -338,8 +353,45 @@ class SessionNotRunningError(BoxlineError):
 
 
 class NothingSavedError(BoxlineError):
-    """409 ``nothing_saved``: ``sessions.resume`` on a stopped session that saved nothing (a machine lost before its first
-    checkpoint, a session from before stop and resume)."""
+    """409 ``nothing_saved``: ``sessions.resume``, or a read of a stopped session's files or folder (``files.read``,
+    ``files.list``, ``files.archive``), on a session that saved nothing (a machine lost before its first checkpoint, a
+    session from before stop and resume)."""
+
+
+class BrowserDisabledError(BoxlineError):
+    """409 ``browser_disabled``: the session was created with ``browser=False``, so it has no browser to drive (create it
+    with ``browser=True``)."""
+
+
+class ShellDisabledError(BoxlineError):
+    """409 ``shell_disabled``: the session was created without ``shell=True``, so it has no shell (create it with
+    ``shell=True``)."""
+
+
+class NotUpdatableError(BoxlineError):
+    """400 ``not_updatable``: ``sessions.update`` named a field that is fixed when the session is created (``browser`` on
+    or off, ``shell``, ``viewport``, ``profile``, ``recordSession``, ``setup``, ``extensions``, ``env``,
+    ``credentials``); the message names it."""
+
+
+class ArchiveTooLargeError(BoxlineError):
+    """413 ``archive_too_large``: the folder is over 1 GiB or 100,000 entries; nothing was sent. Download smaller
+    folders, or single files."""
+
+
+class ArchiveBusyError(RateLimitError):
+    """429 ``archive_busy``: two archives of this session are being made already; try again when one is done (retried
+    automatically)."""
+
+
+class InvalidPathError(BoxlineError):
+    """``invalid_path`` (400 or 403): the path is outside the session's workspace, or goes through a link."""
+
+
+class NotADirectoryError(BoxlineError):  # noqa: A001 - named like the API's code and the Node SDK's class
+    """400 ``not_a_directory``: the path is a file, and the call needs a folder (``files.archive``). Shadows the builtin
+    of the same name inside this package only: ``boxline.NotADirectoryError`` is this one, and ``from boxline import *``
+    does not export it."""
 
 
 class WebhookSignatureError(BoxlineError):
@@ -419,11 +471,18 @@ _BY_CODE: Dict[str, Type[BoxlineError]] = {
     ErrorCode.CREDENTIAL_LOGIN_TIMEOUT: CredentialLoginTimeoutError,
     ErrorCode.CODE_URL_NOT_ALLOWED: CodeUrlNotAllowedError,
     ErrorCode.MACHINE_TOO_OLD: MachineTooOldError,
-    ErrorCode.NOT_CONTINUABLE: NotContinuableError,
+    ErrorCode.NOT_RESUMABLE: NotResumableError,
     ErrorCode.TOO_MANY_MESSAGES: TooManyMessagesError,
     ErrorCode.RUN_NOT_LIVE: RunNotLiveError,
     ErrorCode.SESSION_NOT_RUNNING: SessionNotRunningError,
     ErrorCode.NOTHING_SAVED: NothingSavedError,
+    ErrorCode.BROWSER_DISABLED: BrowserDisabledError,
+    ErrorCode.SHELL_DISABLED: ShellDisabledError,
+    ErrorCode.NOT_UPDATABLE: NotUpdatableError,
+    ErrorCode.ARCHIVE_TOO_LARGE: ArchiveTooLargeError,
+    ErrorCode.ARCHIVE_BUSY: ArchiveBusyError,
+    ErrorCode.INVALID_PATH: InvalidPathError,
+    ErrorCode.NOT_A_DIRECTORY: NotADirectoryError,
 }
 _BY_STATUS: Dict[int, Type[BoxlineError]] = {401: AuthenticationError, 404: NotFoundError, 429: RateLimitError}
 

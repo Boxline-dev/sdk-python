@@ -3,6 +3,109 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
+## 3.0.0 (2026-10-07)
+
+The API tree was redesigned for fewer, more predictable calls: one call per job, a change takes the same shape as the create,
+and nothing is kept as an alias. This release matches it: the old methods and arguments are gone, not deprecated. Needs an
+API from 7 October 2026 or later. The Node SDK (`@boxline/sdk` 3.0.0) changed the same way, with the same names in camelCase.
+
+### Breaking
+
+**Sessions**
+
+- **One `update` for a running session; `extend`, `rotate_proxy`, `rotate_urls`, `live`, `move` and `set_proxy` are gone**, on
+  `bx.sessions` and on the `Session` object. `session.update(timeout=...)` sets the session's length in seconds from its
+  last start (it replaces `extend(seconds)`, which added time), `update(rotate_proxy=True)` and `update(rotate_urls=True)`
+  do what the rotate methods did, `update(proxy=...)` replaces `set_proxy(proxy)`, and `bx.sessions.get(id)` returns fresh
+  signed `connectUrl`, `liveUrl` and `terminalUrl` every time, which replaces `live()`. What is fixed at create (`browser`
+  or `shell` on or off, `viewport`, `profile`, `record_session`, `setup`, `extensions`, `env`, `credentials`) is refused by
+  the API with the new `NotUpdatableError` (400 `not_updatable`).
+- **Sessions no longer move.** `sessions.move()`, `session.move()`, the `moves` field of `SessionData` and the types
+  `MoveTimings`, `MoveShell`, `StoppedProcess` and `SessionUrls` are gone; the platform still moves a session itself when a
+  machine goes away.
+- **`sessions.page()` is gone**: `sessions.list()` returns a page you can use directly (with `total`) or iterate.
+- **Lists take `after` only.** `offset` is removed from `sessions.list` and from its answer.
+- **`liveUrl` is `None` without a browser** (it was set on a shell-only session). `connectUrl` and `liveUrl` are `None`
+  without a browser, `terminalUrl` without a shell.
+- **Browser calls need a browser.** `actions`, `computer`, `run_script` and `export_cookies` (and the `Session` methods built
+  on them: `goto`, `click`, `step`…) on a session created with `browser=False` raise `BrowserDisabledError` (409
+  `browser_disabled`); they used to drive a hidden Chrome. Calls that need a shell on a session without one raise
+  `ShellDisabledError` (409 `shell_disabled`).
+- **Paths.** The SDK calls the new canonical routes: `…/browser/actions`, `…/browser/computer`, `…/browser/script`,
+  `…/browser/export-cookies`, `…/shell/exec`, `/v1/crawls`, `/v1/project/api-keys`, `/v1/project/usage`,
+  `/v1/webhooks/event-types` and `…/events/stream` for a run. It cannot talk to an API from before 7 October 2026.
+
+**Agent runs**
+
+- **`agent.run` takes `session`, a `SessionSpec` dict** (`boxline.types.SessionSpec`: the API's names for what
+  `sessions.create` takes: `browser`, `shell`, `timeout`, `idleTimeout`, `keepAlive`, `viewport`, `userMetadata`, `profile`,
+  `recordSession`, `setup`, `proxy`, `captcha`, `blockAds`, `cookieBanners`, `extensions`, `env`, `credentials`). The
+  arguments `browser`, `shell`, `proxy`, `captcha`, `block_ads`, `cookie_banners`, `extensions`, `profile`, `timeout` and
+  `idle_timeout` are removed from `agent.run`. A shell-only run is `session={"browser": False, "shell": True}`.
+  `session_id`, `keep_session`, `credentials`, `variables`, `allow_with_extensions`, the limits, `output` and the model
+  arguments stay; `session_id` is still the second positional argument.
+- **`agent.takeover()` is now `agent.pause()`**, and `agent.hand_back(run_id, note)` is now `agent.resume(run_id, note=...)`:
+  the same run goes on (one job, one run id). `agent.continue_run()` is gone: `agent.resume(run_id, max_steps=...,
+  max_cost_usd=..., note=..., variables=...)` continues a run that stopped early, **in the same run**, not a new
+  one. `note` is the one text field: for a paused run or one that stopped early, it is an extra note for the model. `NotContinuableError` became `NotResumableError` (`ErrorCode.NOT_RESUMABLE`, 409 `not_resumable`).
+- **`continuable` is `resumable`** (on a run, the stream's `done` event and the `agent_run.finished` webhook data);
+  `continuedFrom` and `continuedBy` are gone, and so is `continuedFrom` on `agent_run.started`. `agent_run.resumed` has
+  `by: "limit"` and `via: "resume"` for a run that stopped early and was resumed. `types.Continuable` is `types.Resumable`.
+
+**Tasks**
+
+- **`session` replaces `browser` and `profile`** in `tasks.create` and `tasks.update`, and in the `Task` you read
+  (`types.TaskProfile` is gone; `session["profile"]` takes a profile). A task can be shell only. `allow_with_extensions` is
+  the task's own argument. Saved tasks were moved to `session` by the API. `session["env"]` is stored sealed and read back
+  as names.
+
+**Webhooks, credentials, project**
+
+- **`webhooks.rotate_secret(id)` is gone**: `webhooks.update(id, rotate_secret=True)` returns the endpoint with the new
+  `secret` (a `NewWebhookEndpoint`).
+- **`credentials.rotate_code_url_secret(name)` is gone**: `credentials.update(name, rotate_code_url_secret=True)` answers
+  with the new `codeUrlSecret`. `types.CodeUrlSecret` is removed.
+- **`project.trajectories()` and `project.set_trajectories()` are gone**: `project.settings()` returns `trajectories` and
+  `project.set_settings(trajectories={"enabled": ..., "source": ...})` changes it.
+- **`stats()` is gone**: `bx.usage(from_, to)` has `running`, `concurrencyLimit`, `agentRuns`, `modelCostUsd` and
+  `ownKeyModelCostUsd`, and the same per day in `byDay`. `types.Stats`, `StatsDay` and `StatsByDay` are removed.
+
+### Added
+
+- **`files.archive(session_id, path=None)`** (and `session.files.archive(path=None)`): a folder, or the whole workspace, as
+  one `.tar.gz` (the bytes). Typed errors: `ArchiveTooLargeError`, `ArchiveBusyError`, `InvalidPathError` and
+  `NotADirectoryError` (`boxline.NotADirectoryError`; it is left out of `__all__` so `from boxline import *` never
+  shadows the builtin of the same name).
+- **Files of a stopped session.** `files.list`, `files.read`, `files.read_text` and `files.archive` work on a stopped
+  session, read-only and without starting a machine, until it is deleted (`NothingSavedError` when it saved nothing).
+- **`session.on_captcha(handler)`**, matching the Node SDK's `onCaptcha`: calls `handler({"state": "detected" | "cleared",
+  "kind", "url", "event"})` when a CAPTCHA starts waiting for a person and when it is gone, and returns the function that
+  stops it. A thread in `Boxline`, an asyncio task in `AsyncBoxline` (the handler may be a coroutine function there).
+- **Shell-only sessions and runs** in the README and the types (`browser=False`), with `BrowserDisabledError` and
+  `ShellDisabledError`.
+- `types.SessionSpec`, `types.TrajectoriesChange`, `types.CaptchaChange`, `types.ExecEventData`, `types.Resumable`; the
+  `exec` events of a session say who ran each command (`data["by"]`: `api`, `agent`, `setup` or `script`, and
+  `data["runId"]` for an agent).
+
+### Upgrading from 2.x
+
+| 2.x | 3.0.0 |
+|---|---|
+| `sessions.extend(id, 60)` | `sessions.update(id, timeout=<the new length in seconds>)` |
+| `session.rotate_proxy()` / `rotate_urls()` | `session.update(rotate_proxy=True)` / `update(rotate_urls=True)` |
+| `session.set_proxy(p)` | `session.update(proxy=p)` |
+| `session.live()` | `session.refresh()` (or `sessions.get(id)`): fresh URLs every time |
+| `session.move()` | none |
+| `sessions.page(...)` | `sessions.list(...)` |
+| `agent.run(task, browser=..., shell=True, proxy=..., ...)` | `agent.run(task, session={"browser": ..., "shell": True, "proxy": ..., ...})` |
+| `agent.takeover(id)` / `agent.hand_back(id, note)` | `agent.pause(id)` / `agent.resume(id, note=note)` |
+| `agent.continue_run(id, ...)` and `run["continuable"]` | `agent.resume(id, ...)` (the same run) and `run["resumable"]` |
+| `tasks.create(..., browser=..., profile=...)` | `tasks.create(..., session={..., "profile": ...})` |
+| `webhooks.rotate_secret(id)` | `webhooks.update(id, rotate_secret=True)` |
+| `credentials.rotate_code_url_secret(name)` | `credentials.update(name, rotate_code_url_secret=True)` |
+| `project.trajectories()` / `set_trajectories(on)` | `project.settings()["trajectories"]` / `project.set_settings(trajectories={"enabled": on})` |
+| `bx.stats(days)` | `bx.usage(from_, to)` |
+
 ## 2.0.0 (2026-10-05)
 
 ### Breaking

@@ -19,7 +19,7 @@ run = bx.agent.run(
     f"Go to {site} and download the report (the CSV link). With Python in the shell, add up the revenue column of "
     f"downloads/report.csv and write the total with two decimals to output/total.txt. Then enter that total in the "
     f'"Total revenue" field of the form on {site}, press Send, and reply with the total and what the site answered.',
-    shell=True,
+    session={"shell": True},
     keep_session=True,  # keep the session afterwards, to read output/total.txt
     max_steps=30,
 )

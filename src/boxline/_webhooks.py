@@ -3,8 +3,8 @@
     Boxline-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">[,v1=…]
 
 keyed with the endpoint's secret (the whole ``whsec_…`` string as UTF-8); for 24 hours after a rotation a second v1
-signed with the old secret follows. ``verify_webhook`` accepts and refuses exactly what the API's reference
-(apps/api/src/webhooks/signing.ts, JavaScript) does, down to how JavaScript trims white space, what it counts as a
+signed with the old secret follows. ``verify_webhook`` accepts and refuses exactly what the API's own signer
+(JavaScript) does, down to how JavaScript trims white space, what it counts as a
 digit and how it measures the header's length; tests/test_webhooks.py checks it against vectors from that signer.
 """
 

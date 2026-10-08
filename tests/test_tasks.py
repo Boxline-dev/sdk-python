@@ -22,8 +22,7 @@ TASK: Dict[str, Any] = {
     "variables": [{"name": "category", "default": "Travel"}],
     "credentials": ["SHOP"],
     "output": {"type": "object", "properties": {"books": {"type": "array"}}, "required": ["books"]},
-    "browser": None,
-    "profile": None,
+    "session": None,
     "model": None,
     "maxSteps": None,
     "notifyOnFailure": None,
@@ -92,8 +91,8 @@ def test_methods_send_the_requests_the_api_expects() -> None:
                     TASK["instruction"],
                     variables=[{"name": "category", "default": "Travel"}, {"name": "password", "secret": True, "origins": ["https://example.com"]}],
                     output=TASK["output"],
-                    browser={"blockAds": True, "cookieBanners": "reject", "locale": "en-GB"},
-                    profile={"id": "prof_1", "persist": False},
+                    session={"browser": {"locale": "en-GB"}, "blockAds": True, "cookieBanners": "reject", "profile": {"id": "prof_1", "persist": False}},
+                    allow_with_extensions=False,
                     model={"provider": "anthropic", "model": "claude-haiku-4-5"},
                     max_steps=10,
                     schedule={"cron": "0 9 * * MON-FRI", "timezone": "Europe/London"},
@@ -140,8 +139,9 @@ def test_methods_send_the_requests_the_api_expects() -> None:
             "GET /v1/tasks/task_1/runs?status=queued",
         ], flavour
         body = f.body(0)
-        assert body["name"] == "Books" and body["output"] == TASK["output"] and body["profile"] == {"id": "prof_1", "persist": False}
-        assert body["maxSteps"] == 10 and body["browser"] == {"blockAds": True, "cookieBanners": "reject", "locale": "en-GB"}
+        assert body["name"] == "Books" and body["output"] == TASK["output"] and body["allowWithExtensions"] is False
+        assert body["maxSteps"] == 10 and body["session"] == {"browser": {"locale": "en-GB"}, "blockAds": True, "cookieBanners": "reject", "profile": {"id": "prof_1", "persist": False}}
+        assert "browser" not in body and "profile" not in body
         assert body["variables"][1] == {"name": "password", "secret": True, "origins": ["https://example.com"]}
         assert "notifyOnFailure" not in body and body["credentials"] == ["SHOP"]
         # None removes a field: it reaches the API as null; fields not passed are left out.

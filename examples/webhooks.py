@@ -44,7 +44,7 @@ again = bx.webhooks.retry_delivery(endpoint["id"], delivery["id"])
 print(f"sent again: {again['status']}, HTTP {again['responseStatus']}, answer \"{again['responseBody']}\"")
 
 # A new secret; the receiver only knows the old one, which keeps signing for 24 hours.
-rotated = bx.webhooks.rotate_secret(endpoint["id"])
+rotated = bx.webhooks.update(endpoint["id"], rotate_secret=True)
 print(f"secret rotated at {rotated['secretRotatedAt']}; the old one signs until {rotated['previousSecretExpiresAt']} (the new secret is in this response only)")
 
 test = bx.webhooks.test(endpoint["id"])

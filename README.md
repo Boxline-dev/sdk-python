@@ -19,12 +19,14 @@ Python 3.9 or newer. Responses are plain dicts with the API's camelCase keys, ty
 (`boxline.types`); the package ships `py.typed`.
 
 - [Sessions and Playwright](#sessions-and-playwright)
-- [Browser, shell and files together](#browser-shell-and-files-together)
+- [Browser, shell or both](#browser-shell-or-both)
+- [Change a running session](#change-a-running-session)
+- [Files, also after a session stops](#files-also-after-a-session-stops)
 - [The page APIs](#the-page-apis)
 - [Web search](#web-search)
 - [Mouse, keyboard and computer use](#mouse-keyboard-and-computer-use)
 - [An agent run with variables](#an-agent-run-with-variables)
-- [Limits, Continue and messages](#limits-continue-and-messages)
+- [Pause, resume, limits and messages](#pause-resume-limits-and-messages)
 - [Tasks and structured output](#tasks-and-structured-output)
 - [Credentials and browser profiles](#credentials-and-browser-profiles)
 - [A script with useModel](#a-script-with-usemodel)
@@ -56,15 +58,31 @@ with bx.sessions.create(timeout=300) as session:      # leaving the block stops 
     print(session.content("markdown")["title"])
 ```
 
-`session.live_url` is a page where a person can watch and take over. `session.stop()` saves the whole browser (every
+`session.live_url` is a page where a person can watch the browser and use it. `session.stop()` saves the whole browser (every
 tab, cookies, storage) and the files, frees the machine and stops billing; `session.resume()` brings it back, same id,
 as it was. A stopped session is kept for your plan's `retentionDays` (`session.data["deletesAt"]`), then deleted;
 `session.delete()` deletes it now, with its recording and logs.
 
-## Browser, shell and files together
+## Browser, shell or both
 
-One session has a browser, a shell and a disk they share: browser downloads land in `<workspace>/downloads`, the
-shell starts in the workspace, and the files API reads and writes it.
+A session is one isolated machine with a disk, and you choose what it has: a **browser** (the default), a **shell**, or
+both. `browser` (default `True`) and `shell` (default `False`) pick the kind; a session needs at least one.
+
+```python
+bx.sessions.create()                              # a browser
+bx.sessions.create(browser=False, shell=True)     # a shell only: no live view, no connect URL
+bx.sessions.create(shell=True)                    # both, sharing /workspace
+```
+
+`session.live_url` and `session.connect_url` are `None` without a browser, `session.terminal_url` is `None` without a
+shell. A browser call (`actions`, `computer`, `run_script`, `export_cookies`, and every `session.goto()`-style method) on
+a shell-only session raises `BrowserDisabledError` (409 `browser_disabled`); a shell call on a session without a shell
+raises `ShellDisabledError` (409 `shell_disabled`). Files, events and the rest work on every kind. Agent runs and tasks
+take the same settings as a `session` dict (`boxline.types.SessionSpec`, with the API's names): `bx.agent.run(task,
+session={"browser": False, "shell": True})` is a shell-only run.
+
+One session with both has a browser, a shell and a disk they share: browser downloads land in `<workspace>/downloads`,
+the shell starts in the workspace, and the files API reads and writes it.
 
 ```python
 with bx.sessions.create(shell=True) as s, sync_playwright() as p:
@@ -83,9 +101,46 @@ EOF""")                                                       # the shell: Pytho
     s.actions([{"action": "fill", "selector": "#total", "value": total}, {"action": "click", "selector": "#send"}])
 ```
 
-The same mix works inside an agent run (`shell=True`: the agent uses `browser_*` tools and `bash`) and inside a script
+The same mix works inside an agent run (`session={"shell": True}`: the agent uses `browser_*` tools and `bash`) and inside a script
 (`require("child_process")` and `require("fs")` next to `page` and `step()`): see
 [agent_mixed.py](examples/agent_mixed.py) and [script_mixed.py](examples/script_mixed.py).
+
+## Change a running session
+
+`session.update(...)` (or `bx.sessions.update(session_id, ...)`) is the one call that changes a running session, with the
+argument names `create` has, and the session as its answer:
+
+```python
+session.update(timeout=900)          # its length in seconds from its last start (expiresAt moves with it)
+session.update(proxy={"type": "residential", "country": "DE"}, block_ads=True, captcha="ask")
+session.update(rotate_proxy=True)    # a new proxy IP now (400 without a proxy)
+session.update(rotate_urls=True)     # new connect, live and terminal URLs: every earlier one stops working
+session.update(proxy=None, idle_timeout=None, user_metadata={"job": "42"})
+```
+
+What is fixed when the session is created (`browser` or `shell` on or off, `viewport`, `profile`, `record_session`,
+`setup`, `extensions`, `env`, `credentials`) is not an argument of `update`; the API answers `NotUpdatableError` (400
+`not_updatable`, naming the field) if one reaches it. A session that is not running raises `SessionNotRunningError`.
+There is no `extend`, `rotate_proxy`, `rotate_urls`, `live` or `move` method: `update` and `sessions.get(id)` (which
+returns fresh signed URLs every time) do those jobs.
+
+## Files, also after a session stops
+
+Every kind of session has a `/workspace`. Besides `list`, `read`, `read_text`, `write`, `delete` and `wait_for`,
+`files.archive` returns a whole folder as one `.tar.gz` (the bytes): everything an agent made, in one call.
+
+```python
+tgz = session.files.archive("results")      # or archive() for the whole workspace
+Path("results.tar.gz").write_bytes(tgz)
+```
+
+`list`, `read` and `archive` also work on a **stopped** session, read-only, without starting a machine, until the session
+is deleted: they are served from the workspace it saved (`NothingSavedError`, 409 `nothing_saved`, when it saved none).
+`write`, `delete`, `wait_for` and commands still need it running (`SessionNotRunningError`). The archive leaves out
+`.boxline/`, stores links as links (never follows them), and is limited to 1 GiB and 100,000 entries
+(`ArchiveTooLargeError`, 413); `NotADirectoryError` (400) for a file (`boxline.NotADirectoryError`, not the builtin),
+`InvalidPathError` for a path outside the workspace, `ArchiveBusyError` (429) when two archives of the session are
+already being made.
 
 ## The page APIs
 
@@ -175,28 +230,39 @@ for event in bx.agent.stream(run["id"]):
         print(event["status"], event.get("result"))
 ```
 
-`agent.takeover(run_id)` and `agent.hand_back(run_id, note)` hand the browser to a person and back; `agent.wait(run_id)`
-polls until the run ends.
+The run's own session is described by `session`, a `SessionSpec` dict with the API's names (what `sessions.create` takes):
+`session={"proxy": True, "captcha": "solve", "profile": {"id": ...}, "timeout": 900}`, or `session={"browser": False,
+"shell": True}` for a shell-only run (its tools follow the session). `session_id=` works in an existing session instead;
+both together are a 400. The flat session arguments (`browser`, `shell`, `proxy`, `captcha`, `block_ads`,
+`cookie_banners`, `extensions`, `profile`, `timeout`, `idle_timeout`) are not arguments of `agent.run` any more: they go
+inside `session`. `agent.wait(run_id)` polls until the run ends.
 
-## Limits, Continue and messages
+## Pause, resume, limits and messages
+
+`agent.pause(run_id)` makes the agent finish its current action and wait (status `paused`), so a person can act in the
+live view or the terminal (a CAPTCHA, a 2FA code, a choice); it works on every kind of run. `agent.resume(run_id,
+note=...)` goes on: it is the **same run** (one job, one run id; steps and usage add up), and the agent is told a person
+had control, plus your `note`.
 
 A run stops at the first of its limits: `max_steps` (default 30; `max_steps=None` for none), `max_cost_usd` (optional,
 model cost in USD), `max_consecutive_errors` tool errors in a row (default 5), the same call with the same result 5
-times, or its session's time (`timeout`, for the run's own session). At a step, cost, error or no-progress limit it ends
-with an `errorCode` (`max_steps`, `max_cost`, `too_many_errors`, `no_progress`), `resultText` says what is done and
-what is left, and `continuable["until"]` says how long it can be continued: its session is kept for 10 minutes.
+times, or its session's time (`session["timeout"]`, for the run's own session). At a step, cost, error or no-progress
+limit it ends with an `errorCode` (`max_steps`, `max_cost`, `too_many_errors`, `no_progress`), `resultText` says what
+is done and what is left, and `resumable["until"]` says how long it can be resumed: its session is kept for 10 minutes.
+`resume` is the same call for that:
 
 ```python
-run = bx.agent.run("Turn every video in the workspace into 30-second clips", shell=True, max_steps=20, max_cost_usd=2)
+run = bx.agent.run("Turn every video in the workspace into 30-second clips", session={"shell": True}, max_steps=20, max_cost_usd=2)
 done = bx.agent.wait(run["id"])
-if done.get("continuable"):
+if done.get("resumable"):
     print(done["resultText"])  # what is done, what is left
-    nxt = bx.agent.continue_run(done["id"], max_steps=30, instruction="The downloads are done; do the clips.")
-    done = bx.agent.wait(nxt["id"])  # nxt["continuedFrom"] == done["id"], same session
+    bx.agent.resume(done["id"], max_steps=30, note="The downloads are done; do the clips.")
+    done = bx.agent.wait(run["id"])  # the same run, in the same session
 ```
 
-A run that had `variables` needs them again on `continue_run` (their values are never stored). `NotContinuableError`:
-the run did not stop at a limit, was continued already, or its window passed.
+A run that had `variables` needs them again on `resume` (their values are never stored). `NotResumableError` (409
+`not_resumable`): the run is neither paused nor stopped early, or its window passed. `RunNotLiveError`: the API server
+running it stopped; resume it once it shows as failed with `server_restarted`.
 
 Tell a working run something without taking the browser: it reads the message at its next step, and a run waiting for
 your help (`ask_user_for_help`) takes it as the answer.
@@ -207,8 +273,9 @@ bx.agent.send_message(run["id"], "Also open page C and include its heading in th
 
 ## Tasks and structured output
 
-A task is a saved agent run: an instruction with `%name%` variables, an output schema, browser settings, a profile,
-a model and, if you like, a schedule. Run it by hand or on its schedule; every run is an agent run.
+A task is a saved agent run: an instruction with `%name%` variables, an output schema, the `session` each run starts
+with (a `SessionSpec` dict: browser, shell or both, proxy, profile, timeout…), a model and, if you like, a schedule. Run
+it by hand or on its schedule; every run is an agent run.
 
 ```python
 task = bx.tasks.create(
@@ -223,6 +290,7 @@ task = bx.tasks.create(
         },
         "required": ["category", "books"],
     },
+    session={"browser": {"locale": "en-GB"}, "blockAds": True},   # or {"browser": False, "shell": True} for a shell-only task
     schedule={"cron": "0 9 * * MON-FRI", "timezone": "Europe/London", "enabled": False},
 )
 
@@ -241,6 +309,9 @@ bx.tasks.update(task["id"], schedule={"enabled": True})   # None removes a field
 - **Variables**: plain ones are written into the instruction (and kept with the run); `{"name", "secret": True,
   "origins"}` is never stored, must come with every run, and is typed without the model seeing it. A task with a
   secret variable cannot have a schedule. A run missing a value raises `MissingVariablesError`.
+- **Session**: `session` replaces the former `browser` and `profile` arguments (a browser profile is
+  `session["profile"]`); `allow_with_extensions` is the task's own argument. `session["env"]` is stored sealed and read
+  back as names only; `tasks.update(id, session=None)` removes it.
 - **Credentials**: `credentials=["SHOP"]` on `tasks.create` gives every run the saved credentials' placeholders (see
   [Credentials and browser profiles](#credentials-and-browser-profiles)); a scheduled task may use them, and the task
   keeps the names only.
@@ -333,8 +404,8 @@ page = s.login("SHOP", url="https://shop.example.com/login")                    
 - A pushed code or link is used once, by a wait that began before it arrived, and kept sealed for 10 minutes. A link must
   be on one of the credential's sites. `push_code` is not retried by the SDK (a second push is a second code).
 - With `code_source="url"` the platform asks your `code_url` every 5 s while a run waits (a signed POST; check it with
-  `verify_webhook` and the `codeUrlSecret` that `create` and `update` return once; `credentials.rotate_code_url_secret(name)`
-  makes a new one). Answer `{"code": ...}` or `{"link": ...}`, or 204 for "not yet".
+  `verify_webhook` and the `codeUrlSecret` that `create` and `update` return once; `credentials.update(name,
+  rotate_code_url_secret=True)` makes a new one, shown once; the old one stops at once). Answer `{"code": ...}` or `{"link": ...}`, or 204 for "not yet".
 - Without a code in time a step, action or `login` raises `CredentialCodeTimeoutError`.
 
 ## A script with useModel
@@ -370,6 +441,17 @@ with bx.sessions.create(captcha="ask") as s:
         s.wait_for_human(timeout=300)   # raises CaptchaTimeoutError if nobody solves it
 ```
 
+`session.on_captcha(handler)` calls `handler(change)` when a CAPTCHA starts waiting for a person (`change["state"]` is
+`"detected"`) and when it is gone (`"cleared"`); `change` has `kind`, `url` and the session's `captcha` event. It polls the
+session's events in the background (a thread in `Boxline`, an asyncio task in `AsyncBoxline`, where `handler` may be a
+coroutine function), stops by itself when the session ends, and returns the function that stops it sooner:
+
+```python
+stop = s.on_captcha(lambda c: print(f"CAPTCHA {c['state']}: {c['kind']} on {c['url']}"))  # tell someone: s.live_url
+...
+stop()
+```
+
 A plain-English step that waits too long raises `CaptchaTimeoutError` (409 `captcha_timeout`).
 
 ## Browser settings and extensions
@@ -383,7 +465,7 @@ s.goto("https://example.com")
 s.refresh()
 print(s.blocked_requests)  # refused inside the machine, before any proxy (collected about every 30 s)
 s.update(block_ads=False, cookie_banners="off")
-bx.fetch("https://example.com", block_ads=True)  # screenshot, pdf, extract, crawl.start and agent.run take it too
+bx.fetch("https://example.com", block_ads=True)  # screenshot, pdf, extract and crawl.start take it too; agent runs and tasks take it inside `session`
 ```
 
 Chrome extensions (Manifest V3, plan feature `extensions`): upload the zip of the extension's folder once, then start
@@ -434,7 +516,7 @@ return Response(status=200)
 
 - The signature's timestamp must be within 5 minutes of your clock (`tolerance_seconds=` changes it), which stops
   replays of old deliveries.
-- `bx.webhooks.rotate_secret(id)` returns a new secret; for 24 hours deliveries are signed with both, so switch at your
+- `bx.webhooks.update(id, rotate_secret=True)` returns the endpoint with a new `secret`; for 24 hours deliveries are signed with both, so switch at your
   pace. `verify_webhook` takes a list too: `[new_secret, old_secret]`.
 - `bx.webhooks.test(id)` sends a `webhook.test` event now; `bx.webhooks.test(id, type="agent_run.waiting")` sends a
   made-up sample of that type (marked `test: True`). `bx.webhooks.deliveries(id, status="failed")` lists
@@ -499,11 +581,12 @@ or `for p in bx.crawl.pages(id)`).
   `InvalidExtensionError`, `PayloadTooLargeError`, `LimitReachedError`, `ExtensionDeniedError`, `CrossSiteRequestError`,
   `MissingVariablesError`, `PlanLimitError`, `CredentialExistsError`, `CredentialNotAllowedError`, `TooManyCredentialValuesError`,
   `CredentialCodeTimeoutError`, `CredentialLinkWrongSiteError`, `CredentialLoginFailedError`, `CodeUrlNotAllowedError`,
-  `MachineTooOldError`, `NotContinuableError`, `TooManyMessagesError`, `SessionNotRunningError`, `NothingSavedError`, `AuthenticationError`,
-  `NotFoundError`, and
+  `MachineTooOldError`, `NotResumableError`, `TooManyMessagesError`, `RunNotLiveError`, `SessionNotRunningError`, `NothingSavedError`,
+  `BrowserDisabledError`, `ShellDisabledError`, `NotUpdatableError`, `ArchiveTooLargeError`, `ArchiveBusyError`, `InvalidPathError`,
+  `NotADirectoryError`, `AuthenticationError`, `NotFoundError`, and
   `BoxlineConnectionError` /
   `BoxlineTimeoutError` when no answer came back. `ErrorCode` has the codes.
-- **Retries.** GETs, and the calls that create or start something (sessions, bulk, agent runs, continued runs, messages
+- **Retries.** GETs, and the calls that create or start something (sessions, bulk, agent runs, resumed runs, messages
   to runs, crawls, API keys, profiles, extension uploads, tasks, task runs), are retried after a network error, a time-out, 429 and 5xx: 2 retries by default, exponential backoff
   from 0.5 s to 8 s with jitter, or what `Retry-After` / `RateLimit-Reset` say (up to 60 s; longer waits go to you as a
   `RateLimitError`). Other POSTs (exec, actions, fetch…) are never retried: they could run twice.
@@ -530,20 +613,20 @@ methods without it (`session.stop()`).
 
 | Area | Methods |
 |---|---|
-| Account | `me`, `has_feature`, `auth.signup`, `auth.login`, `auth.logout`, `project.trajectories`, `project.set_trajectories`, `project.settings`, `project.set_settings`, `api_keys.list`, `api_keys.create`, `api_keys.revoke` |
-| Webhooks | `webhooks.create`, `list`, `get`, `update`, `delete`, `rotate_secret`, `test`, `deliveries`, `retry_delivery`; `verify_webhook` (no request) |
-| Sessions | `sessions.create`, `get`, `list`, `update`, `stop`, `resume`, `delete`, `move`, `extend`, `rotate_proxy`, `rotate_urls`, `live`, `bulk` |
+| Account | `me`, `has_feature`, `auth.signup`, `auth.login`, `auth.logout`, `project.settings`, `project.set_settings` (both with `trajectories`), `api_keys.list`, `api_keys.create`, `api_keys.revoke` |
+| Webhooks | `webhooks.create`, `list`, `get`, `update` (also `rotate_secret`), `delete`, `test`, `event_types`, `deliveries`, `retry_delivery`; `verify_webhook` (no request) |
+| Sessions | `sessions.create`, `get`, `list`, `update` (also `timeout`, `rotate_proxy`, `rotate_urls`), `stop`, `resume`, `delete`, `bulk` |
 | Browser | `sessions.actions`, `sessions.computer`; on a session: `goto`, `click`, `hover`, `fill`, `type`, `type_credential`, `press`, `scroll`, `wait`, `select`, `elements`, `evaluate`, `content`, `screenshot`, `cursor`, `upload`, `tabs`, `new_tab`, `switch_tab`, `close_tab`, `back`, `forward`, `reload`, `step`, `extract`, `export_cookies`, `computer`, `mouse.move`/`move_by`/`click`/`down`/`up`/`drag`, `keyboard.key`/`type`/`press` |
 | Shell and scripts | `sessions.exec`, `exec_stream`, `run_script`, `restart_shell` |
-| Files | `sessions.files.list`, `read`, `read_text`, `write`, `delete`, `wait_for` |
-| Logs | `sessions.events`, `stream_events`, `pages`, `recording`, `recording_frame`; on a session: `wait_for_human` |
+| Files | `sessions.files.list`, `read`, `read_text`, `archive`, `write`, `delete`, `wait_for` |
+| Logs | `sessions.events`, `stream_events`, `pages`, `recording`, `recording_frame`; on a session: `wait_for_human`, `on_captcha` |
 | Browser profiles | `profiles.create`, `get`, `list`, `update`, `delete` |
-| Credentials | `credentials.create`, `list`, `get`, `update`, `delete`, `audit`, `push_code`, `rotate_code_url_secret`; on a session: `type_credential`, `login` |
+| Credentials | `credentials.create`, `list`, `get`, `update` (also `rotate_code_url_secret`), `delete`, `audit`, `push_code`; on a session: `type_credential`, `login` |
 | Extensions | `extensions.upload`, `list`, `get`, `delete` |
 | Web | `fetch`, `screenshot`, `pdf`, `extract`, `search`, `crawl.start`, `get`, `list`, `cancel`, `pages`, `wait` |
-| Agent | `agent.models`, `run`, `get`, `list`, `takeover`, `hand_back`, `cancel`, `continue_run`, `send_message`, `stream`, `wait` |
+| Agent | `agent.models`, `run`, `get`, `list`, `pause`, `resume`, `cancel`, `send_message`, `stream`, `wait` |
 | Tasks | `tasks.create`, `list`, `get`, `update`, `delete`, `run`, `runs`, `wait_for_run` |
-| Usage | `usage`, `stats`, `pricing`, `openapi`, `health` |
+| Usage | `usage` (with what `stats` had), `pricing`, `openapi`, `health` |
 
 ## Examples
 

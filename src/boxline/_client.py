@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import os
+import threading
 import time
 from typing import Any, Iterator, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypeVar, Union, overload
 
@@ -363,12 +364,11 @@ class Boxline:
     # ----- usage and meta
 
     def usage(self, from_: Optional[str] = None, to: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.Usage:
-        """Usage and cost of the sessions created in a period (default: this month so far)."""
-        return self._json("GET", "/v1/usage", params={"from": from_, "to": to}, options=options)
-
-    def stats(self, days: int = 7, *, options: Optional[RequestOptions] = None) -> t.Stats:
-        """Totals and per-day numbers for the last ``days`` days (UTC, including today)."""
-        return self._json("GET", "/v1/stats", params={"days": days}, options=options)
+        """What the project used and spent in a period (``from_``, ``to``; default: this month so far): sessions and how
+        many run now (``running``, with the plan's ``concurrencyLimit``), agent runs and their model cost (``agentRuns``,
+        ``modelCostUsd``, ``ownKeyModelCostUsd``), seconds, proxy data, CAPTCHA solving and searches, and the same per day
+        in ``byDay``."""
+        return self._json("GET", "/v1/project/usage", params={"from": from_, "to": to}, options=options)
 
     def pricing(self, *, options: Optional[RequestOptions] = None) -> t.Pricing:
         """The public price table and plans (no API key needed)."""
@@ -425,31 +425,26 @@ class Project:
     def __init__(self, client: Boxline) -> None:
         self._c = client
 
-    def trajectories(self, *, options: Optional[RequestOptions] = None) -> t.Trajectories:
-        """The Trajectories program setting: ``{"enabled", "noticeSeenAt", "decidedBy"}`` (on by default; see the
-        Terms of Service and Privacy Policy)."""
-        return self._c._json("GET", "/v1/project/trajectories", options=options)
-
-    def set_trajectories(self, enabled: bool, source: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.Trajectories:
-        """Turns the Trajectories program on or off for this project (logged)."""
-        return self._c._json("PUT", "/v1/project/trajectories", json=clean({"enabled": enabled, "source": source}), options=options)
-
     def settings(self, *, options: Optional[RequestOptions] = None) -> t.ProjectSettings:
         """The project's settings: ``captchaDefault`` is what new sessions and agent runs without a ``captcha`` option
-        get; ``captchaDefaultEffective`` what they get now (the plan may no longer include solving)."""
+        get; ``captchaDefaultEffective`` what they get now (the plan may no longer include solving); ``trajectories`` the
+        Trajectories program setting ``{"enabled", "noticeSeenAt", "decidedBy"}`` (on by default; see the Terms of Service
+        and Privacy Policy)."""
         return self._c._json("GET", "/v1/project/settings", options=options)
 
     def set_settings(
         self,
         captcha_default: Optional[str] = None,
         default_model: Any = NOT_GIVEN,
+        trajectories: Optional[t.TrajectoriesChange] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.ProjectSettings:
         """Changes the fields you pass (``captcha_default="solve"`` needs a plan with CAPTCHA solving: 402 otherwise).
         ``default_model={"provider": "openai", "model": "gpt-6-luna"}`` is the model used when a request names none;
-        ``default_model=None`` clears it."""
-        body: Dict[str, Any] = clean({"captchaDefault": captcha_default})
+        ``default_model=None`` clears it. ``trajectories={"enabled": False}`` turns the Trajectories program off for this
+        project (the choice is logged; ``"source"`` is "notice" or "settings", the default)."""
+        body: Dict[str, Any] = clean({"captchaDefault": captcha_default, "trajectories": trajectories})
         if default_model is not NOT_GIVEN:
             body["defaultModel"] = default_model  # None clears it
         return self._c._json("PUT", "/v1/project/settings", json=body, options=options)
@@ -485,14 +480,14 @@ class ApiKeys:
 
     def list(self, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> Pager[t.ApiKey]:
         """Active keys, oldest first (the keys themselves are never shown again; ``prefix`` identifies them)."""
-        return self._c._list("/v1/api-keys", {"limit": limit, "after": after}, lambda k: k, options)
+        return self._c._list("/v1/project/api-keys", {"limit": limit, "after": after}, lambda k: k, options)
 
     def create(self, name: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.NewApiKey:
         """A new key; ``key`` is in this response only."""
-        return self._c._json("POST", "/v1/api-keys", json=clean({"name": name}), options=options)
+        return self._c._json("POST", "/v1/project/api-keys", json=clean({"name": name}), options=options)
 
     def revoke(self, key_id: str, *, options: Optional[RequestOptions] = None) -> None:
-        self._c._json("DELETE", f"/v1/api-keys/{seg(key_id)}", options=options)
+        self._c._json("DELETE", f"/v1/project/api-keys/{seg(key_id)}", options=options)
 
 
 # ---------------------------------------------------------------- sessions
@@ -535,12 +530,14 @@ class Sessions:
         *,
         options: Optional[RequestOptions] = None,
     ) -> "Session":
-        """Starts a session (an Idempotency-Key is sent, so a retry never starts a second one).
+        """Starts a session (an Idempotency-Key is sent, so a retry never starts a second one): a browser (the default),
+        a shell (``browser=False, shell=True``) or both (``shell=True``). Agent runs and tasks take the same settings as
+        a ``session`` dict (``types.SessionSpec``, with the API's names).
 
         ``timeout`` is the session's length in seconds (default 300). ``idle_timeout`` (opt-in, 30 to ``timeout``): the
         session ends (end reason ``idle``) after that many seconds without activity (CDP commands, live-view input,
         terminal keys, exec, files, actions and steps, scripts, agent steps and messages; an agent run working in it, or
-        one that can still be continued, counts the whole time). ``profile`` is a browser profile's id (or
+        one that can still be resumed, counts the whole time). ``profile`` is a browser profile's id (or
         ``{"id": ..., "persist": True}``) to start from its cookies and local storage; ``setup`` lists shell commands
         (package installs) run at start.
 
@@ -568,7 +565,7 @@ class Sessions:
         An extension sees every page and every typed value in the session: use only ones you trust.
 
         ``env`` (needs ``shell=True``): variables for the session's shell, ``{"NAME": "value"}``: new terminals, exec,
-        scripts and ``setup`` commands get them, and they are set again on every new machine (move, resume, recovery).
+        scripts and ``setup`` commands get them, and they are set again on every new machine (resume, recovery).
         Names like the shell's (not PATH, HOME or BOXLINE_*), at most 100, 64 KB together; the session shows the names
         only. ``credentials`` (needs ``shell=True``): credentials exported into the shell (scope "shell" or "all", or
         ``shell: True``; CredentialNotAllowedError otherwise): a secret as ``$NAME``, a password as ``$NAME_USERNAME``
@@ -600,6 +597,8 @@ class Sessions:
         return self._one("POST", "/v1/sessions", body, options)
 
     def get(self, session_id: str, *, options: Optional[RequestOptions] = None) -> "Session":
+        """The session, with freshly signed ``connectUrl``, ``liveUrl`` and ``terminalUrl`` every time (None where the
+        session has no browser or shell, or is not running)."""
         return self._one("GET", f"/v1/sessions/{seg(session_id)}", None, options)
 
     def list(
@@ -612,20 +611,14 @@ class Sessions:
         sort: Optional[str] = None,
         limit: Optional[int] = None,
         after: Optional[str] = None,
-        offset: Optional[int] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> Pager["Session"]:
         """Sessions, newest first unless ``sort`` says otherwise (``created_asc``, ``duration_desc``). ``status``: one or
         several (``["RUNNING", "STOPPED"]``); ``kind``: ``browser``, ``combined`` or ``shell``; ``q``: an id prefix or
-        text in ``userMetadata``. Iterate for every session; the first page's ``total`` counts every match.
-        ``offset`` is deprecated: use ``after``."""
-        params = {"status": status, "kind": kind, "q": q, "from": from_, "to": to, "sort": sort, "limit": limit, "after": after, "offset": offset}
+        text in ``userMetadata``. Iterate for every session; the first page's ``total`` counts every match."""
+        params = {"status": status, "kind": kind, "q": q, "from": from_, "to": to, "sort": sort, "limit": limit, "after": after}
         return self._c._list("/v1/sessions", params, self._wrap, options)
-
-    def page(self, **filters: Any) -> Page["Session"]:
-        """Deprecated: use ``list`` (its first page has ``total`` too)."""
-        return self.list(**filters)
 
     def bulk(self, action: str, ids: Sequence[str], *, options: Optional[RequestOptions] = None) -> t.BulkResult:
         """Stop, resume or delete 1 to 100 sessions at once (``action``: "stop", "resume" or "delete"; ``ids`` are
@@ -643,13 +636,34 @@ class Sessions:
         block_ads: Optional[bool] = None,
         cookie_banners: Optional[str] = None,
         idle_timeout: Any = NOT_GIVEN,
+        timeout: Optional[int] = None,
+        rotate_proxy: Optional[bool] = None,
+        rotate_urls: Optional[bool] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> "Session":
-        """Changes keepAlive, userMetadata, the captcha option, the browser settings, the proxy (``proxy=None`` removes
-        it; a new one applies at once), ad blocking or cookie banners (both at once), or the idle timeout (seconds,
-        counted from now; ``idle_timeout=None`` switches it off)."""
-        body = clean({"keepAlive": keep_alive, "userMetadata": user_metadata, "captcha": captcha, "browser": browser, "blockAds": block_ads, "cookieBanners": cookie_banners})
+        """The one call that changes a running session, with the argument names ``create`` has: ``keep_alive``,
+        ``timeout`` (its length in seconds, counted from its last start; at least 60 s from now, at most the plan's
+        maximum: PlanLimitError), ``idle_timeout`` (seconds, counted from now; ``None`` switches it off), ``user_metadata``,
+        ``proxy`` (``None`` removes it; a new one applies at once), ``captcha``, ``browser`` settings (``mode``,
+        ``locale``, ``timezone``), ``block_ads`` and ``cookie_banners`` (both at once), plus ``rotate_proxy=True`` (a new
+        proxy IP now; 400 without a proxy) and ``rotate_urls=True`` (new signed connect, live and terminal URLs: every
+        earlier one stops working). What is fixed when the session is created (``browser`` or ``shell`` on or off,
+        viewport, profile, record_session, setup, extensions, env, credentials) is not here: NotUpdatableError.
+        SessionNotRunningError for a session that is not running."""
+        body = clean(
+            {
+                "keepAlive": keep_alive,
+                "timeout": timeout,
+                "userMetadata": user_metadata,
+                "captcha": captcha,
+                "browser": browser,
+                "blockAds": block_ads,
+                "cookieBanners": cookie_banners,
+                "rotateProxy": rotate_proxy,
+                "rotateUrls": rotate_urls,
+            }
+        )
         if proxy is not NOT_GIVEN:
             body["proxy"] = proxy
         if idle_timeout is not NOT_GIVEN:
@@ -669,36 +683,13 @@ class Sessions:
         """Ends the session for good: what it saved, its recording and its logs are deleted now. It cannot be undone."""
         return self._one("DELETE", f"/v1/sessions/{seg(session_id)}", None, options)
 
-    def move(self, session_id: str, *, options: Optional[RequestOptions] = None) -> Dict[str, Any]:
-        """Moves the live session to a fresh machine: ``{"session": Session, "timings": {...}, "shell": {...} | None}``
-        (``shell``: where the shell continues, the exported variables that came along, and the processes that were
-        stopped; None without a shell). Clients reconnect to the same connect URL."""
-        r = self._c._json("POST", f"/v1/sessions/{seg(session_id)}/move", options=options)
-        return {"session": self._wrap(r["session"]), "timings": r["timings"], "shell": r.get("shell")}
-
-    def extend(self, session_id: str, seconds: int, *, options: Optional[RequestOptions] = None) -> "Session":
-        """Adds time (60–3600 s), up to the plan's maximum session length."""
-        return self._one("POST", f"/v1/sessions/{seg(session_id)}/extend", {"seconds": seconds}, options)
-
-    def rotate_proxy(self, session_id: str, *, options: Optional[RequestOptions] = None) -> "Session":
-        """A new IP for the session's proxy (sticky proxies keep one IP until this is called)."""
-        return self._one("POST", f"/v1/sessions/{seg(session_id)}/proxy/rotate", None, options)
-
-    def rotate_urls(self, session_id: str, *, options: Optional[RequestOptions] = None) -> "Session":
-        """Revokes the session's connect, live and terminal URLs (e.g. one leaked) and returns it with fresh ones."""
-        return self._one("POST", f"/v1/sessions/{seg(session_id)}/rotate-urls", None, options)
-
-    def live(self, session_id: str, *, options: Optional[RequestOptions] = None) -> t.SessionUrls:
-        """Fresh signed URLs: ``{"liveUrl", "terminalUrl", "connectUrl"}`` (treat them like passwords)."""
-        return self._c._json("GET", f"/v1/sessions/{seg(session_id)}/live", options=options)
-
     def actions(self, session_id: str, actions: Union[ActionItem, Sequence[ActionItem]], timeout_ms: Optional[int] = None, *, options: Optional[RequestOptions] = None) -> List[t.ActionResult]:
         """Runs browser actions in order, next to the browser, e.g. ``[{"action": "goto", "url": ...}, "click Sign in",
         {"action": "content"}]`` (a bare string is a plain-English step); stops at the first failure. Each result's
-        ``text`` says what happened."""
+        ``text`` says what happened. BrowserDisabledError (409) on a session created with ``browser=False``."""
         items = [actions] if isinstance(actions, (dict, str)) else list(actions)
         wait = actions_wait(items)
-        r = self._c._json("POST", f"/v1/sessions/{seg(session_id)}/actions", json=clean({"actions": items, "timeoutMs": timeout_ms}), options=options, timeout=wait)
+        r = self._c._json("POST", f"/v1/sessions/{seg(session_id)}/browser/actions", json=clean({"actions": items, "timeoutMs": timeout_ms}), options=options, timeout=wait)
         return r["results"]
 
     def computer(
@@ -720,7 +711,7 @@ class Sessions:
         value on every call). A failure in the page is ``ok: False``; input that cannot be mapped, or a point off the
         screen, raises (400 ``invalid_request`` / ``out_of_viewport``)."""
         body = {**action, **clean({"maxWidth": max_width, "screenshot": screenshot, "format": format, "quality": quality, "cursor": cursor})}
-        return self._c._json("POST", f"/v1/sessions/{seg(session_id)}/computer", json=body, options=options)
+        return self._c._json("POST", f"/v1/sessions/{seg(session_id)}/browser/computer", json=body, options=options)
 
     def exec(
         self,
@@ -734,13 +725,14 @@ class Sessions:
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.ExecResult:
-        """Runs a command (persistent bash by default: cd/export survive). ``shell=False`` runs it in a fresh process.
+        """Runs a command in the session's shell (persistent bash by default: cd/export survive). ``shell=False`` runs it in
+        a fresh process. ShellDisabledError (409) on a session created without ``shell=True``.
         ``cwd``, ``env`` and ``credentials`` (credentials as environment variables, scope "shell" or "all": a secret
         as ``$NAME``, a password as ``$NAME_USERNAME`` and ``$NAME_PASSWORD``, and ``boxline-otp NAME`` prints its 2FA
         code) apply to this command only; the session's exported credentials and these are hidden in the output as
         ``%NAME%``."""
         body = clean({"command": command, "timeoutMs": timeout_ms, "cwd": cwd, "env": env, "shell": shell, "credentials": as_list(credentials)})
-        return self._c._json("POST", f"/v1/sessions/{seg(session_id)}/exec", json=body, options=options, timeout=(timeout_ms or 120_000) / 1000 + 30 + SETUP_WAIT_S)
+        return self._c._json("POST", f"/v1/sessions/{seg(session_id)}/shell/exec", json=body, options=options, timeout=(timeout_ms or 120_000) / 1000 + 30 + SETUP_WAIT_S)
 
     def exec_stream(
         self,
@@ -756,7 +748,7 @@ class Sessions:
     ) -> "ExecStream":
         """Runs a command and streams its output (see ``ExecStream``); ``credentials`` as for ``exec``."""
         body = clean({"command": command, "timeoutMs": timeout_ms, "cwd": cwd, "env": env, "shell": shell, "credentials": as_list(credentials), "stream": True})
-        return ExecStream(self._c._stream("POST", f"/v1/sessions/{seg(session_id)}/exec", json=body, options=options))
+        return ExecStream(self._c._stream("POST", f"/v1/sessions/{seg(session_id)}/shell/exec", json=body, options=options))
 
     def run_script(
         self,
@@ -770,7 +762,7 @@ class Sessions:
         *,
         options: Optional[RequestOptions] = None,
     ) -> "ExecStream":
-        """Runs Playwright (JavaScript) code inside the session (needs a shell), streaming its output. In scope:
+        """Runs Playwright (JavaScript) code inside the session (needs a browser and a shell), streaming its output. In scope:
         ``page``, ``context``, ``browser``, ``env`` and the AI helpers ``step()``, ``extract()`` and
         ``useModel(model)`` / ``useModel(provider, model)``. A step or extract uses the call's own
         ``{provider, model}``, else the last ``useModel()``, else ``ai`` (``{"provider": ..., "model": ...}``), else
@@ -781,7 +773,7 @@ class Sessions:
         is used only when it is listed here. In a session with Chrome extensions they need
         ``allow_with_extensions=True`` (VariablesWithExtensionsError otherwise)."""
         body = clean({"code": code, "env": env, "timeoutMs": timeout_ms, "ai": ai, "credentials": as_list(credentials), "allowWithExtensions": allow_with_extensions})
-        return ExecStream(self._c._stream("POST", f"/v1/sessions/{seg(session_id)}/scripts/run", json=body, options=options))
+        return ExecStream(self._c._stream("POST", f"/v1/sessions/{seg(session_id)}/browser/script", json=body, options=options))
 
     def restart_shell(self, session_id: str, name: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> None:
         """Restarts the persistent shell (or the named one)."""
@@ -789,7 +781,7 @@ class Sessions:
 
     def export_cookies(self, session_id: str, path: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.CookieFile:
         """Writes the browser's cookies as a Netscape cookie file in the workspace (for curl -b / wget)."""
-        return self._c._json("POST", f"/v1/sessions/{seg(session_id)}/browser/cookies/export", json=clean({"path": path}), options=options)
+        return self._c._json("POST", f"/v1/sessions/{seg(session_id)}/browser/export-cookies", json=clean({"path": path}), options=options)
 
     def events(
         self,
@@ -800,8 +792,9 @@ class Sessions:
         *,
         options: Optional[RequestOptions] = None,
     ) -> Pager[t.SessionEvent]:
-        """Console, network, navigation, error, lifecycle, action, exec and captcha events, oldest first. Iterating
-        stops once caught up; ``page.next_after`` is the ``after`` to poll with later."""
+        """Console, network, navigation, error, lifecycle, action, exec and captcha events, oldest first. Every shell
+        command is an ``exec`` event, whoever ran it: ``data["by"]`` is ``api``, ``agent`` (with ``data["runId"]``),
+        ``setup`` or ``script``. Iterating stops once caught up; ``page.next_after`` is the ``after`` to poll with later."""
         return self._c._list(f"/v1/sessions/{seg(session_id)}/events", {"types": as_list(types), "after": after, "limit": limit}, lambda e: e, options)
 
     def stream_events(self, session_id: str, after: Optional[int] = None, *, options: Optional[RequestOptions] = None) -> Iterator[t.SessionEvent]:
@@ -827,24 +820,38 @@ class Sessions:
 
 
 class SessionFiles:
-    """Files in a session's /workspace (shared by the shell and the browser's downloads folder)."""
+    """Files in a session's /workspace, shared by the shell and the browser's downloads folder. Every kind of session has
+    them. Reading a file, listing a folder and downloading a folder (``archive``) also work on a STOPPED session,
+    read-only and without starting a machine, until the session is deleted: they are served from the workspace it saved
+    (NothingSavedError when it saved none). Writing, deleting and waiting for a file need a running session
+    (SessionNotRunningError)."""
 
     def __init__(self, client: Boxline) -> None:
         self._c = client
 
     def list(self, session_id: str, path: str = ".", *, options: Optional[RequestOptions] = None) -> List[t.FileEntry]:
-        """The entries of a folder: ``[{"name", "type", "size", "mtime"}]``."""
+        """The entries of a folder (``"."`` is the workspace): ``[{"name", "type", "size", "mtime"}]``. Also on a stopped
+        session."""
         r = self._c._json("GET", f"/v1/sessions/{seg(session_id)}/files", params={"path": path, "list": "1"}, options=options)
         return r["entries"]
 
     def read(self, session_id: str, path: str, *, options: Optional[RequestOptions] = None) -> bytes:
+        """A file's bytes. Also on a stopped session."""
         return self._c._bytes("GET", f"/v1/sessions/{seg(session_id)}/files", params={"path": path}, options=options)
+
+    def archive(self, session_id: str, path: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> bytes:
+        """A folder and everything in it as one ``.tar.gz`` (the bytes): everything an agent made, in one call (``path``
+        defaults to the whole workspace; ``.boxline/`` is left out and links are stored as links, never followed). Also
+        on a stopped session. At most 1 GiB and 100,000 entries (ArchiveTooLargeError, before any byte is sent);
+        NotADirectoryError for a file, InvalidPathError for a path outside the workspace, ArchiveBusyError when two
+        archives of the session are being made."""
+        return self._c._bytes("GET", f"/v1/sessions/{seg(session_id)}/files/archive", params={"path": path}, options=options)
 
     def read_text(self, session_id: str, path: str, encoding: str = "utf-8", *, options: Optional[RequestOptions] = None) -> str:
         return (self.read(session_id, path, options=options)).decode(encoding)
 
     def write(self, session_id: str, path: str, data: Union[str, bytes], *, options: Optional[RequestOptions] = None) -> t.FileRef:
-        """Writes a file (folders are made as needed)."""
+        """Writes a file (folders are made as needed). Running sessions only."""
         content = data.encode() if isinstance(data, str) else data
         res = self._c._send("PUT", f"/v1/sessions/{seg(session_id)}/files", content=content, params={"path": path}, options=options)
         return _parse(res)
@@ -990,23 +997,6 @@ class Session:
         """Ends the session for good: what it saved, its recording and its logs are deleted now. It cannot be undone."""
         return self._set(self._c.sessions.delete(self.id, options=options))
 
-    def rotate_urls(self, *, options: Optional[RequestOptions] = None) -> "Session":
-        """Makes the current connect/live/terminal URLs stop working (e.g. one leaked) and closes connections made
-        with them; the session gets fresh URLs."""
-        return self._set(self._c.sessions.rotate_urls(self.id, options=options))
-
-    def move(self, *, options: Optional[RequestOptions] = None) -> t.MoveTimings:
-        """Moves the live session to a fresh machine; returns the timings."""
-        r = self._c.sessions.move(self.id, options=options)
-        self.data = r["session"].data
-        return r["timings"]
-
-    def live(self, *, options: Optional[RequestOptions] = None) -> t.SessionUrls:
-        """Fresh signed URLs (also stored in ``data``)."""
-        urls = self._c.sessions.live(self.id, options=options)
-        self.data.update(urls)  # type: ignore[typeddict-item]
-        return urls
-
     def update(
         self,
         keep_alive: Optional[bool] = None,
@@ -1017,26 +1007,23 @@ class Session:
         block_ads: Optional[bool] = None,
         cookie_banners: Optional[str] = None,
         idle_timeout: Any = NOT_GIVEN,
+        timeout: Optional[int] = None,
+        rotate_proxy: Optional[bool] = None,
+        rotate_urls: Optional[bool] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> "Session":
-        """Changes keepAlive, userMetadata, the captcha option ("ask", "ignore" or "solve"), the browser options, the
-        proxy (None removes it), ad blocking, cookie banners or the idle timeout (None switches it off)."""
+        """Changes the running session, with the argument names ``sessions.create`` has: ``keep_alive``, ``timeout`` (its
+        length in seconds from its last start), ``idle_timeout`` (``None`` switches it off), ``user_metadata``, ``proxy``
+        (``None`` removes it), ``captcha``, ``browser`` settings, ``block_ads``, ``cookie_banners``, plus
+        ``rotate_proxy=True`` (a new proxy IP now) and ``rotate_urls=True`` (the current connect, live and terminal URLs
+        stop working and the session gets fresh ones). What is fixed when the session is created raises
+        NotUpdatableError."""
         return self._set(
-            self._c.sessions.update(self.id, keep_alive, user_metadata, captcha, browser, proxy, block_ads, cookie_banners, idle_timeout, options=options)
+            self._c.sessions.update(
+                self.id, keep_alive, user_metadata, captcha, browser, proxy, block_ads, cookie_banners, idle_timeout, timeout, rotate_proxy, rotate_urls, options=options
+            )
         )
-
-    def set_proxy(self, proxy: Optional[Proxy], *, options: Optional[RequestOptions] = None) -> "Session":
-        """Sets, changes or (None) removes the session's proxy; new connections use it right away."""
-        return self.update(proxy=proxy, options=options)
-
-    def rotate_proxy(self, *, options: Optional[RequestOptions] = None) -> "Session":
-        """A new IP for the session's proxy (sticky sessions keep one IP until this is called)."""
-        return self._set(self._c.sessions.rotate_proxy(self.id, options=options))
-
-    def extend(self, seconds: int, *, options: Optional[RequestOptions] = None) -> "Session":
-        """Adds time (60–3600 s), up to the plan's maximum session length."""
-        return self._set(self._c.sessions.extend(self.id, seconds, options=options))
 
     def wait_for_human(self, timeout: float = 300, interval: float = 1) -> "Session":
         """Waits until no CAPTCHA is waiting for a person (someone solved it in the live view, or the page moved
@@ -1050,6 +1037,49 @@ class Session:
             if time.monotonic() > deadline:
                 raise CaptchaTimeoutError(408, "captcha_timeout", f"nobody solved the CAPTCHA on {attention.get('url')} in time")
             _sleep(interval)
+
+    def on_captcha(self, handler: Callable[[t.CaptchaChange], Any], interval: float = 2.0, after: int = 0) -> Callable[[], None]:
+        """Calls ``handler(change)`` when a CAPTCHA starts waiting for a person (``change["state"]`` is ``"detected"``) and
+        when it is gone (``"cleared"``); ``change`` is ``{"state", "kind", "url", "event"}`` (``event`` is the session's
+        ``captcha`` event). It polls the session's ``captcha`` events every ``interval`` seconds, starting after event
+        number ``after`` (default 0: challenges seen before you subscribed are reported too), and stops by itself when the
+        session ends; the function it returns stops it sooner::
+
+            stop = s.on_captcha(lambda change: print(change["state"], change["kind"], change["url"]))
+            ...
+            stop()
+
+        In the async client ``handler`` may be a coroutine function and runs in the event loop; in the sync client it runs
+        on a daemon thread, so it must be a plain function."""
+        stop = {"stopped": False}
+
+        def watch() -> None:
+            cursor: Any = after
+            rounds = 0
+            while not stop["stopped"]:
+                rounds += 1
+                try:
+                    page = self.events(types=["captcha"], after=cursor)
+                    for event in page.data:
+                        if stop["stopped"]:
+                            return
+                        data: Any = event.get("data") or {}
+                        if data.get("state") in ("detected", "cleared") and data.get("kind"):
+                            outcome = handler({"state": data["state"], "kind": data["kind"], "url": event.get("url") or "", "event": event})
+                    cursor = page.raw.get("nextAfter", cursor)
+                    if rounds % 5 == 0:
+                        self.refresh()  # stop by itself once the session has ended
+                    if self.data.get("status") != "RUNNING":
+                        return
+                except Exception:  # keep polling: the session may be recovering
+                    pass
+                _sleep(interval)
+
+        threading.Thread(target=watch, name="boxline-on-captcha", daemon=True).start()
+        
+        def stop_watching() -> None:
+            stop["stopped"] = True
+        return stop_watching
 
     # ----- browser
 
@@ -1407,7 +1437,9 @@ class Keyboard:
 
 
 class Files:
-    """Files in the session's workspace (shared by the shell and the browser's downloads folder)."""
+    """Files in the session's workspace (shared by the shell and the browser's downloads folder). ``list``, ``read`` and
+    ``archive`` also work on a stopped session (read-only, no machine started); ``write``, ``delete`` and ``wait_for``
+    need it running."""
 
     def __init__(self, session: Session) -> None:
         self._s = session
@@ -1417,6 +1449,10 @@ class Files:
 
     def read(self, path: str, *, options: Optional[RequestOptions] = None) -> bytes:
         return self._s._c.sessions.files.read(self._s.id, path, options=options)
+
+    def archive(self, path: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> bytes:
+        """A folder (default: the whole workspace) and everything in it as one ``.tar.gz`` (the bytes)."""
+        return self._s._c.sessions.files.archive(self._s.id, path, options=options)
 
     def read_text(self, path: str, encoding: str = "utf-8", *, options: Optional[RequestOptions] = None) -> str:
         return self._s._c.sessions.files.read_text(self._s.id, path, encoding, options=options)
@@ -1606,6 +1642,7 @@ class Credentials:
         description: Any = NOT_GIVEN,
         shell: Optional[bool] = None,
         scope: Optional[t.CredentialScope] = None,
+        rotate_code_url_secret: Optional[bool] = None,
         options: Optional[RequestOptions] = None,
     ) -> t.CredentialWritten:
         """Changes the fields you pass (a password's ``origins``, ``username``, ``password``, ``code_source``,
@@ -1617,9 +1654,22 @@ class Credentials:
         ``totp_secret`` when it has 2FA), else a 400 ``invalid_request``; so does a change of ``code_source`` (removing
         2FA included) or ``code_url`` (the ``password`` again). A 409 ``conflict`` when the sites, scope, ``shell``,
         ``code_source`` or ``code_url`` changed meanwhile (send it again). A new ``code_url`` answers with a new
-        ``codeUrlSecret``, shown once. A running agent run keeps the values it started with; a session that exports the
-        credential gets the new ones on its next machine (move, resume, recovery)."""
-        body = clean({"username": username, "password": password, "codeUrl": code_url, "codeTimeoutSeconds": code_timeout_seconds, "value": value, "shell": shell, "scope": scope})
+        ``codeUrlSecret``, shown once, and so does ``rotate_code_url_secret=True`` (any time, for a password with
+        ``code_source="url"``: requests to ``code_url`` are signed with it from now on, check them with
+        ``verify_webhook``; the old one stops at once). A running agent run keeps the values it started with; a session
+        that exports the credential gets the new ones on its next machine (resume, recovery)."""
+        body = clean(
+            {
+                "username": username,
+                "password": password,
+                "codeUrl": code_url,
+                "codeTimeoutSeconds": code_timeout_seconds,
+                "value": value,
+                "shell": shell,
+                "scope": scope,
+                "rotateCodeUrlSecret": rotate_code_url_secret,
+            }
+        )
         if description is not NOT_GIVEN:
             body["description"] = description
         if code_source is not NOT_GIVEN:
@@ -1653,11 +1703,6 @@ class Credentials:
             raise ValueError("push_code takes exactly one of code= and link=")
         body = {"code": code} if code is not None else {"link": link}
         return self._c._json("POST", f"/v1/credentials/{seg(name)}/codes", json=body, options=options)
-
-    def rotate_code_url_secret(self, name: str, *, options: Optional[RequestOptions] = None) -> t.CodeUrlSecret:
-        """For a password with ``code_source="url"``: a new ``codeUrlSecret`` (``whsec_…``, shown this once). Requests to
-        ``code_url`` are signed with it from now on (check them with ``verify_webhook``); the old one stops at once."""
-        return self._c._json("POST", f"/v1/credentials/{seg(name)}/code-url-secret", options=options)
 
     def audit(self, name: Optional[str] = None, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> Pager[t.CredentialAuditEntry]:
         """Changes to credentials, each use (once per session, command, run, script, task run, typed field or 2FA code)
@@ -1695,18 +1740,18 @@ class Crawl:
         """Starts a crawl (an Idempotency-Key is sent, so a retry never starts a second one)."""
         body = clean({"url": url, "maxPages": max_pages, "maxDepth": max_depth, "sameHost": same_host, "include": as_list(include), "exclude": as_list(exclude),
                       "format": format, "waitUntil": wait_until, "delayMs": delay_ms, "timeoutMs": timeout_ms, "proxy": proxy, "browser": browser, "blockAds": block_ads})
-        return self._c._json("POST", "/v1/crawl", json=body, options=options)
+        return self._c._json("POST", "/v1/crawls", json=body, options=options)
 
     def get(self, crawl_id: str, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.CrawlJob:
         """The job and one page of its pages (``limit=0`` for the job only); ``next`` is the cursor of the following pages."""
-        return self._c._json("GET", f"/v1/crawl/{seg(crawl_id)}", params={"limit": limit, "after": after}, options=options)
+        return self._c._json("GET", f"/v1/crawls/{seg(crawl_id)}", params={"limit": limit, "after": after}, options=options)
 
     def list(self, limit: Optional[int] = None, after: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> Pager[t.CrawlJob]:
         """Jobs, newest first (without their pages)."""
-        return self._c._list("/v1/crawl", {"limit": limit, "after": after}, lambda j: j, options)
+        return self._c._list("/v1/crawls", {"limit": limit, "after": after}, lambda j: j, options)
 
     def cancel(self, crawl_id: str, *, options: Optional[RequestOptions] = None) -> t.CrawlJob:
-        return self._c._json("POST", f"/v1/crawl/{seg(crawl_id)}/cancel", options=options)
+        return self._c._json("POST", f"/v1/crawls/{seg(crawl_id)}/cancel", options=options)
 
     def pages(self, crawl_id: str, limit: int = 100, *, options: Optional[RequestOptions] = None) -> Iterator[t.CrawlPage]:
         """Every page crawled so far, in index order (``limit`` pages per request)."""
@@ -1755,6 +1800,7 @@ class Webhooks:
     def get(self, webhook_id: str, *, options: Optional[RequestOptions] = None) -> t.WebhookEndpoint:
         return self._c._json("GET", f"/v1/webhooks/{seg(webhook_id)}", options=options)
 
+    @overload
     def update(
         self,
         webhook_id: str,
@@ -1763,11 +1809,38 @@ class Webhooks:
         enabled: Optional[bool] = None,
         description: Any = NOT_GIVEN,
         *,
+        rotate_secret: Literal[True],
         options: Optional[RequestOptions] = None,
-    ) -> t.WebhookEndpoint:
+    ) -> t.NewWebhookEndpoint: ...
+
+    @overload
+    def update(
+        self,
+        webhook_id: str,
+        url: Optional[str] = None,
+        events: Optional[Sequence[str]] = None,
+        enabled: Optional[bool] = None,
+        description: Any = NOT_GIVEN,
+        *,
+        rotate_secret: Optional[bool] = None,
+        options: Optional[RequestOptions] = None,
+    ) -> t.WebhookEndpoint: ...
+
+    def update(
+        self,
+        webhook_id: str,
+        url: Optional[str] = None,
+        events: Optional[Sequence[str]] = None,
+        enabled: Optional[bool] = None,
+        description: Any = NOT_GIVEN,
+        *,
+        rotate_secret: Optional[bool] = None,
+        options: Optional[RequestOptions] = None,
+    ) -> Any:
         """Changes the URL, events or description (``None`` clears it), or switches it on or off (``enabled=True`` also
-        forgets its failures)."""
-        body = clean({"url": url, "events": as_list(events), "enabled": enabled})
+        forgets its failures). ``rotate_secret=True`` makes a new signing secret: the answer then has it as ``secret``
+        (shown this once), and the old one keeps signing for 24 hours (a second v1)."""
+        body = clean({"url": url, "events": as_list(events), "enabled": enabled, "rotateSecret": rotate_secret})
         if description is not NOT_GIVEN:
             body["description"] = description
         return self._c._json("PATCH", f"/v1/webhooks/{seg(webhook_id)}", json=body, options=options)
@@ -1775,10 +1848,6 @@ class Webhooks:
     def delete(self, webhook_id: str, *, options: Optional[RequestOptions] = None) -> None:
         """Deletes the endpoint with its queue and delivery log."""
         self._c._json("DELETE", f"/v1/webhooks/{seg(webhook_id)}", options=options)
-
-    def rotate_secret(self, webhook_id: str, *, options: Optional[RequestOptions] = None) -> t.NewWebhookEndpoint:
-        """A new secret (in this response only); the old one keeps signing too for 24 hours (a second v1)."""
-        return self._c._json("POST", f"/v1/webhooks/{seg(webhook_id)}/rotate-secret", options=options)
 
     def test(self, webhook_id: str, type: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.WebhookDelivery:
         """Sends a ``webhook.test`` event to this endpoint now, or with ``type`` a made-up sample of that event type
@@ -1789,7 +1858,7 @@ class Webhooks:
     def event_types(self, *, options: Optional[RequestOptions] = None) -> t.WebhookEventTypeList:
         """Every event type an endpoint can subscribe to, with its group and description (subscribe to ``"*"`` for
         all)."""
-        return self._c._json("GET", "/v1/webhooks/events", options=options)
+        return self._c._json("GET", "/v1/webhooks/event-types", options=options)
 
     def deliveries(
         self,
@@ -1817,9 +1886,9 @@ _TASK_RUN_OPEN = ["queued", "running", "paused"]
 
 
 class Tasks:
-    """Tasks: saved agent runs (an instruction with ``%name%`` variables, an optional output schema, browser settings,
-    a browser profile and a model), run by hand or on a schedule. Every run is an agent run tagged with the task. Needs the
-    plan's ``agentRuns``; the plan limits tasks and schedules switched on (PlanLimitError)."""
+    """Tasks: saved agent runs (an instruction with ``%name%`` variables, an optional output schema, the ``session`` each
+    run starts with, credentials and a model), run by hand or on a schedule. Every run is an agent run tagged with the
+    task. Needs the plan's ``agentRuns``; the plan limits tasks and schedules switched on (PlanLimitError)."""
 
     def __init__(self, client: Boxline) -> None:
         self._c = client
@@ -1830,14 +1899,14 @@ class Tasks:
         instruction: str,
         variables: Optional[Sequence[t.TaskVariable]] = None,
         output: Optional[t.OutputSchema] = None,
-        browser: Optional[JSON] = None,
-        profile: Optional[Union[str, JSON]] = None,
+        session: Optional[t.SessionSpec] = None,
         model: Optional[Dict[str, str]] = None,
         max_steps: Any = NOT_GIVEN,
         notify_on_failure: Optional[str] = None,
         schedule: Optional[JSON] = None,
         credentials: Optional[Sequence[str]] = None,
         max_cost_usd: Optional[float] = None,
+        allow_with_extensions: Optional[bool] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.Task:
@@ -1846,23 +1915,25 @@ class Tasks:
         ``instruction`` has ``%name%`` where a variable goes. ``variables``: up to 50 ``{"name", "default", "description"}``,
         or ``{"name", "secret": True, "origins", "shell"}`` for a value that is never stored (it comes with every run,
         and the model sees only ``%name%``). ``output``: a JSON Schema every run's answer must match (see
-        ``agent.run``). ``browser``: the settings of each run's own session, with the API's keys (``{"proxy": {"type":
-        "residential", "country": "GB"}, "blockAds": True, "locale": "en-GB"}``). ``profile``: a browser profile id, or
-        ``{"id", "persist"}``. ``model``: ``{"provider", "model"}`` from ``agent.models()``. ``max_steps``: 1-1000
-        (default 30 when not passed); ``max_steps=None`` means no step limit. ``max_cost_usd``: each run's money budget
-        (0.01-100 USD, as on ``agent.run``). ``browser`` also takes ``timeout`` and ``idleTimeout`` for each run's own
-        session. ``schedule``: ``{"cron": "0 9 * * MON-FRI", "timezone": "Europe/London", "variables": {...},
-        "enabled": True}``: at most every 5 minutes, on the plan's ``schedules`` (PlanLimitError beyond). ``credentials``:
-        credential names (scope "agent" or "all") each run gets as placeholders, as on ``agent.run``; a scheduled
-        task may use them (secret variables cannot be scheduled)."""
+        ``agent.run``). ``session``: the settings of each run's own session, a ``SessionSpec`` with the API's names, as
+        ``sessions.create`` takes them (``{"proxy": {"type": "residential", "country": "GB"}, "blockAds": True,
+        "browser": {"locale": "en-GB"}, "profile": {"id": "prof_…"}, "timeout": 900}``); a task can be shell only
+        (``{"browser": False, "shell": True}``), and ``env`` is sealed and read back as names only. ``model``:
+        ``{"provider", "model"}`` from ``agent.models()``. ``max_steps``: 1-1000 (default 30 when not passed);
+        ``max_steps=None`` means no step limit. ``max_cost_usd``: each run's money budget (0.01-100 USD, as on
+        ``agent.run``). ``allow_with_extensions=True``: needed for a task with secret variables or credentials and a
+        session with extensions. ``schedule``: ``{"cron": "0 9 * * MON-FRI", "timezone": "Europe/London", "variables":
+        {...}, "enabled": True}``: at most every 5 minutes, on the plan's ``schedules`` (PlanLimitError beyond).
+        ``credentials``: credential names (scope "agent" or "all") each run gets as placeholders, as on ``agent.run``; a
+        scheduled task may use them (secret variables cannot be scheduled)."""
         body = clean(
             {
                 "name": name,
                 "instruction": instruction,
                 "variables": list(variables) if variables is not None else None,
                 "output": output,
-                "browser": browser,
-                "profile": profile,
+                "session": session,
+                "allowWithExtensions": allow_with_extensions,
                 "model": model,
                 "notifyOnFailure": notify_on_failure,
                 "schedule": schedule,
@@ -1888,27 +1959,26 @@ class Tasks:
         instruction: Optional[str] = None,
         variables: Optional[Sequence[t.TaskVariable]] = None,
         output: Any = NOT_GIVEN,
-        browser: Any = NOT_GIVEN,
-        profile: Any = NOT_GIVEN,
+        session: Any = NOT_GIVEN,
         model: Any = NOT_GIVEN,
         max_steps: Any = NOT_GIVEN,
         notify_on_failure: Any = NOT_GIVEN,
         schedule: Any = NOT_GIVEN,
         credentials: Any = NOT_GIVEN,
         max_cost_usd: Any = NOT_GIVEN,
+        allow_with_extensions: Optional[bool] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.Task:
-        """Changes the fields you pass; ``None`` removes ``output``, ``browser``, ``profile``, ``model``,
-        ``max_cost_usd``, ``notify_on_failure``, ``schedule`` or ``credentials`` (the whole new list of credential names);
-        ``max_steps=None`` means no step limit.
+        """Changes the fields you pass; ``None`` removes ``output``, ``session`` (the whole new ``SessionSpec``, as on
+        ``create``), ``model``, ``max_cost_usd``, ``notify_on_failure``, ``schedule`` or ``credentials`` (the whole new
+        list of credential names); ``max_steps=None`` means no step limit.
         ``schedule`` fields are merged into the current schedule (``schedule={"enabled": False}`` pauses it); switching it
         on, or changing cron or timezone, counts from now."""
-        body = clean({"name": name, "instruction": instruction, "variables": list(variables) if variables is not None else None})
+        body = clean({"name": name, "instruction": instruction, "variables": list(variables) if variables is not None else None, "allowWithExtensions": allow_with_extensions})
         for key, value in (
             ("output", output),
-            ("browser", browser),
-            ("profile", profile),
+            ("session", session),
             ("model", model),
             ("maxSteps", max_steps),
             ("notifyOnFailure", notify_on_failure),
@@ -1935,7 +2005,7 @@ class Tasks:
         """Runs the task now and returns its task run (status running) right away; ``wait_for_run`` waits for the result.
         Plain values are written into the instruction; secret ones must come with every run and go in as agent
         variables (the model sees only ``%name%``). MissingVariablesError when a variable without a default has no
-        value. ``session_id``: work in that session (its own settings apply). Counts as an agent run (rate, plan, spend
+        value. ``session_id``: work in that session (its own settings apply; the task's ``session`` does not). Counts as an agent run (rate, plan, spend
         cap). An Idempotency-Key is sent, so a retry never starts a second run."""
         body = clean({"variables": variables, "sessionId": session_id})
         return self._c._json("POST", f"/v1/tasks/{seg(task_id)}/runs", json=body, options=options)
@@ -2031,7 +2101,8 @@ class Extensions:
 
 
 class Agent:
-    """Agent runs: a model (Claude or GPT) drives the session's browser and shell to finish a task."""
+    """Agent runs: a model (Claude, GPT, Grok or Gemini) drives the session's browser and/or shell to finish a task. Its
+    tools follow the session: ``run(task, session={"browser": False, "shell": True})`` is a shell-only run."""
 
     def __init__(self, client: Boxline) -> None:
         self._c = client
@@ -2044,35 +2115,33 @@ class Agent:
         self,
         task: str,
         session_id: Optional[str] = None,
-        browser: Optional[Union[bool, JSON]] = None,
-        shell: Optional[bool] = None,
+        session: Optional[t.SessionSpec] = None,
         max_steps: Any = NOT_GIVEN,
         effort: Optional[str] = None,
         keep_session: Optional[bool] = None,
         provider: Optional[str] = None,
         model: Optional[str] = None,
-        proxy: Optional[Proxy] = None,
-        captcha: Optional[str] = None,
         variables: Optional[Dict[str, t.AgentVariable]] = None,
         mode: Optional[str] = None,
-        block_ads: Optional[bool] = None,
-        cookie_banners: Optional[str] = None,
-        extensions: Optional[Sequence[str]] = None,
         allow_with_extensions: Optional[bool] = None,
         output: Optional[t.OutputSchema] = None,
         credentials: Optional[Sequence[str]] = None,
-        profile: Optional[Union[str, JSON]] = None,
-        timeout: Optional[int] = None,
-        idle_timeout: Optional[int] = None,
         max_cost_usd: Optional[float] = None,
         max_consecutive_errors: Optional[int] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.AgentRunStarted:
         """Starts a run and returns ``{"id", "status", "sessionId", "provider", "model"}`` right away (an
-        Idempotency-Key is sent, so a retry never starts a second run). ``proxy`` and ``captcha`` ("ask", "ignore" or
-        "solve") apply to the run's own session (see ``sessions.create``). ``browser`` is False for a run without
-        one, or the session's browser options, e.g. ``{"mode": "realistic"}``.
+        Idempotency-Key is sent, so a retry never starts a second run). The run's tools follow its session.
+
+        ``session``: the run's own session, a ``SessionSpec`` dict with the API's names, as ``sessions.create`` takes
+        its arguments: a browser only (the default), a shell only (``{"browser": False, "shell": True}``) or both,
+        with its ``proxy``, ``captcha`` ("ask", "ignore" or "solve"), ``extensions``, ``profile``, ``blockAds``,
+        ``timeout`` and so on (see ``types.SessionSpec``). ``session_id`` works in an existing session instead (its own
+        settings apply); giving both is a 400. The run's session lasts 1800 seconds unless ``session["timeout"]`` says
+        otherwise (or the plan's maximum when shorter); a run stops with ``session_timeout`` when its session's time ends.
+        ``session["credentials"]`` are exported into the session's shell; the run's ``credentials`` below are what the AI
+        may type.
 
         ``variables`` are secrets and other values the agent may type as ``%name%`` placeholders (e.g. a task
         "sign in with %email% and %password%"): ``{"email": "me@example.com", "password": {"value": "...",
@@ -2089,9 +2158,8 @@ class Agent:
         with ``supportsComputerUse`` in ``agent.models()``; 400 otherwise, or without a browser). Tool and handover steps
         carry the model's ``thought``.
 
-        ``block_ads``, ``cookie_banners`` and ``extensions`` apply to the run's own session. ``variables`` in a session
-        with extensions (which can read every typed value) are refused (VariablesWithExtensionsError) unless
-        ``allow_with_extensions=True``.
+        ``variables`` in a session with extensions (which can read every typed value) are refused
+        (VariablesWithExtensionsError) unless ``allow_with_extensions=True``.
 
         ``output`` (structured output): a JSON Schema the answer must match, e.g. ``{"type": "object", "properties":
         {"title": {"type": "string"}}, "required": ["title"]}``. The finished run's ``result`` is then the JSON answer
@@ -2101,11 +2169,10 @@ class Agent:
         ``credentials``: credentials as placeholders, exactly like ``variables``, each with the credential's own
         ``origins`` and ``shell`` rule (scope "agent" or "all"; CredentialNotAllowedError for scope "shell"): ``%NAME%``
         for a secret, ``%NAME.username%``, ``%NAME.password%`` and ``%NAME.otp%`` for a password. An explicit variable
-        with the same name wins. ``profile``: for the run's own session, a browser profile to start with (its id, or
-        ``{"id", "persist"}``); when it links a password credential (``profiles.update``), the run gets that credential
+        with the same name wins. A password credential linked to the session's ``profile`` (``profiles.update``) is added
         as if it were listed in ``credentials``.
 
-        The run's ``steps`` include ``handover``/``handback`` steps and, for a CAPTCHA pause, ``captcha`` steps:
+        The run's ``steps`` include ``handover``/``resume`` steps and, for a CAPTCHA pause, ``captcha`` steps:
         ``state`` "solving" or "waiting" (with ``kind``, ``host`` and, when waiting, ``reason``), then "solved"
         with ``by`` ("auto" or "person") and ``ms``; messages you sent (``send_message``) are ``message`` steps.
 
@@ -2113,33 +2180,22 @@ class Agent:
         until it is done or its session's time ends it), ``max_cost_usd`` (0.01-100 USD of model cost, checked before
         each model call; default none), ``max_consecutive_errors`` (tool errors in a row, 1-20, default 5), and the same
         call with the same result 5 times. At one of these the run ends with ``errorCode`` ``max_steps``, ``max_cost``,
-        ``too_many_errors`` or ``no_progress``, ``resultText`` says what is done and what is left, and ``continuable``
-        says until when ``continue_run`` can carry it on (its own session is kept that long). ``timeout`` (seconds) and
-        ``idle_timeout`` are for the run's own session (default 1800, or the plan's maximum when shorter; not with
-        ``session_id``); a run stops with ``session_timeout`` when its session's time ends."""
+        ``too_many_errors`` or ``no_progress``, ``resultText`` says what is done and what is left, and ``resumable``
+        says until when ``resume`` can carry it on (its own session is kept that long)."""
         body = clean(
             {
                 "task": task,
                 "sessionId": session_id,
-                "browser": browser,
-                "shell": shell,
+                "session": session,
                 "effort": effort,
                 "keepSession": keep_session,
                 "provider": provider,
                 "model": model,
-                "proxy": proxy,
-                "captcha": captcha,
                 "variables": variables,
                 "mode": mode,
-                "blockAds": block_ads,
-                "cookieBanners": cookie_banners,
-                "extensions": as_list(extensions),
                 "allowWithExtensions": allow_with_extensions,
                 "output": output,
                 "credentials": as_list(credentials),
-                "profile": {"id": profile} if isinstance(profile, str) else profile,
-                "timeout": timeout,
-                "idleTimeout": idle_timeout,
                 "maxCostUsd": max_cost_usd,
                 "maxConsecutiveErrors": max_consecutive_errors,
             }
@@ -2155,45 +2211,50 @@ class Agent:
         """Runs, newest first."""
         return self._c._list("/v1/agent/runs", {"limit": limit, "after": after}, lambda r: r, options)
 
-    def takeover(self, run_id: str, reason: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.AgentRun:
-        """Take the browser from the agent; it finishes its current action, then waits. RunNotLiveError when its server stopped."""
-        return self._c._json("POST", f"/v1/agent/runs/{seg(run_id)}/takeover", json=clean({"reason": reason}), options=options)
+    def pause(self, run_id: str, reason: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.AgentRun:
+        """Pauses the run: the agent finishes its current action, then waits (status ``paused``), so a person can act in
+        the live view or the terminal (a CAPTCHA, a 2FA code, a choice). Works on every kind of run, a shell-only one too.
+        ``resume`` goes on. RunNotLiveError when its server stopped; a BoxlineError with code ``invalid_state`` unless the
+        run is running."""
+        return self._c._json("POST", f"/v1/agent/runs/{seg(run_id)}/pause", json=clean({"reason": reason}), options=options)
 
-    def hand_back(self, run_id: str, note: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.AgentRun:
-        """Give the browser back; the agent reads ``note`` before it continues. RunNotLiveError when its server stopped: continue_run."""
-        return self._c._json("POST", f"/v1/agent/runs/{seg(run_id)}/handback", json=clean({"note": note}), options=options)
-
-    def cancel(self, run_id: str, *, options: Optional[RequestOptions] = None) -> t.AgentRun:
-        """Stops the run for good."""
-        return self._c._json("POST", f"/v1/agent/runs/{seg(run_id)}/cancel", options=options)
-
-    def continue_run(
+    def resume(
         self,
         run_id: str,
+        note: Optional[str] = None,
         max_steps: Any = NOT_GIVEN,
-        instruction: Optional[str] = None,
-        variables: Optional[Dict[str, Union[str, Dict[str, str]]]] = None,
         max_cost_usd: Any = NOT_GIVEN,
+        variables: Optional[Dict[str, Union[str, Dict[str, str]]]] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.AgentRun:
-        """Continues a run that stopped at one of its limits (``errorCode`` ``max_steps``, ``max_cost``,
-        ``too_many_errors`` or ``no_progress``) while its ``continuable`` is set: a new run in the same session with the
-        same model, mode, output schema, credentials and profile, and a compact record of what the previous run did.
-        Returns the new run (``continuedFrom`` links back); ``wait`` and ``stream`` work with it like any run.
+        """Keeps a run going: the SAME run, one job and one run id (its steps and usage add up). It works on
 
-        ``max_steps``: 1-1000 (default: the run's own); ``max_steps=None`` means no step limit. ``max_cost_usd``: the new
-        run's own budget (default: the run's own; ``None``: none). ``instruction``: an extra note for the model (at most
-        2000 characters). ``variables``: the original run's variables again (their values are never stored), as text or
-        ``{"value": ...}``; they keep their sites and shell rule (MissingVariablesError when one is missing).
-        NotContinuableError: it did not stop at a limit, was continued already, or its window passed. An Idempotency-Key
-        is sent, so a retry never starts a second run."""
-        body: Dict[str, Any] = clean({"instruction": instruction, "variables": variables})
+        - a paused run (after ``pause``, a CAPTCHA, or the agent asking for help): ``note`` (an extra note for the model, at
+          most 2000 characters) is told to the agent with the news that a person had control, and it looks at the page
+          again;
+        - a run that stopped early (its ``resumable`` is set: it used all its steps (``max_steps``), reached its
+          ``max_cost_usd``, had too many tool errors in a row, repeated itself, or its API server restarted):
+          ``max_steps`` (1-1000; ``None`` means no step limit; default: the run's own), ``max_cost_usd`` (the model cost
+          this stretch may add; default: the run's own; ``None``: none), ``note`` (an extra note for the model) and
+          ``variables`` (the run's variables again: their values are never stored; every name, as text or
+          ``{"value": ...}``; MissingVariablesError when one is missing). A stopped session is resumed first.
+
+        NotResumableError when the run is neither (it is running, completed, canceled, failed for another reason, or its
+        window passed), RunNotLiveError when its server stopped. An Idempotency-Key is sent, so a retry never resumes it
+        twice::
+
+            run = bx.agent.resume(run["id"], max_steps=30, note="The CSV is downloaded already")"""
+        body: Dict[str, Any] = clean({"note": note, "variables": variables})
         if max_steps is not NOT_GIVEN:
             body["maxSteps"] = max_steps
         if max_cost_usd is not NOT_GIVEN:
             body["maxCostUsd"] = max_cost_usd
-        return self._c._json("POST", f"/v1/agent/runs/{seg(run_id)}/continue", json=body, options=options)
+        return self._c._json("POST", f"/v1/agent/runs/{seg(run_id)}/resume", json=body, options=options)
+
+    def cancel(self, run_id: str, *, options: Optional[RequestOptions] = None) -> t.AgentRun:
+        """Stops the run for good."""
+        return self._c._json("POST", f"/v1/agent/runs/{seg(run_id)}/cancel", options=options)
 
     def send_message(self, run_id: str, text: str, *, options: Optional[RequestOptions] = None) -> t.AgentMessageSent:
         """Tells a working run something (1-2000 characters) without taking the browser: the agent reads it at its next
@@ -2206,7 +2267,7 @@ class Agent:
         """Yields the run's events as they happen: its steps so far, then new steps, the model's ``thought`` as soon as
         its reply arrives, ``status`` changes, live shell ``exec``/``output``, and a final ``done`` event, after which the
         iteration ends."""
-        res = self._c._stream("GET", f"/v1/agent/runs/{seg(run_id)}/events", options=options)
+        res = self._c._stream("GET", f"/v1/agent/runs/{seg(run_id)}/events/stream", options=options)
         try:
             for event in _sse(res.iter_lines()):
                 yield event
