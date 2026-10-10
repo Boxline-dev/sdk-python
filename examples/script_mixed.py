@@ -18,7 +18,7 @@ bx = Boxline()
 provider = next((p for p in bx.agent.models()["providers"] if p["available"]), None)
 if provider is None:
     raise SystemExit("no model provider is configured on this server")
-fast = "claude-haiku-4-5" if provider["id"] == "anthropic" else "gpt-6-luna"
+fast = "claude-haiku-5-5" if provider["id"] == "anthropic" else "gpt-6-luna"
 
 # The script is JavaScript, run with Node inside the session, next to its browser; page, step() and useModel() are
 # in scope, and require() gives Node's own modules.

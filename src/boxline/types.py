@@ -830,7 +830,7 @@ class ModelInfo(TypedDict):
     supportsEffort: bool
     #: Agent runs with mode="computer" work with this model.
     supportsComputerUse: NotRequired[bool]
-    #: The computer-use tool the model gets in mode "computer" ("computer_20251124", "computer_20250124", "computer").
+    #: The computer-use tool the model gets in mode "computer" ("computer_toolset_20260801" for Claude, "computer" for OpenAI).
     computerTool: NotRequired[Optional[str]]
     default: bool
 

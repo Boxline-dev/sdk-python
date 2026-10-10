@@ -415,10 +415,10 @@ page = s.login("SHOP", url="https://shop.example.com/login")                    
 
 ```python
 code = """
-useModel("claude-haiku-4-5");                  // every later step() and extract() uses it
+useModel("claude-haiku-5-5");                  // every later step() and extract() uses it
 await page.goto("https://example.com/signup");
 await step("type %email% into the email field");
-await step("click Continue", { model: "claude-sonnet-5" }); // this call only
+await step("click Continue", { model: "claude-sonnet-5-5" }); // this call only
 console.log(JSON.stringify(await extract("the plan names and prices")));
 """
 with bx.sessions.create(shell=True) as s, s.run_script(code, env={"email": "ada@example.com"}) as proc:

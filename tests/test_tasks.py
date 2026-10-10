@@ -93,7 +93,7 @@ def test_methods_send_the_requests_the_api_expects() -> None:
                     output=TASK["output"],
                     session={"browser": {"locale": "en-GB"}, "blockAds": True, "cookieBanners": "reject", "profile": {"id": "prof_1", "persist": False}},
                     allow_with_extensions=False,
-                    model={"provider": "anthropic", "model": "claude-haiku-4-5"},
+                    model={"provider": "anthropic", "model": "claude-haiku-5-5"},
                     max_steps=10,
                     schedule={"cron": "0 9 * * MON-FRI", "timezone": "Europe/London"},
                     credentials=("SHOP",),
@@ -240,7 +240,7 @@ def test_wait_for_run_times_out_and_reports_a_missing_run() -> None:
 
 def test_agent_run_sends_output_and_reads_the_json_answer() -> None:
     schema = {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
-    started = {"id": "run_1", "status": "running", "sessionId": "s1", "provider": "anthropic", "model": "claude-haiku-4-5", "mode": "tools"}
+    started = {"id": "run_1", "status": "running", "sessionId": "s1", "provider": "anthropic", "model": "claude-haiku-5-5", "mode": "tools"}
     finished = {"id": "run_1", "status": "completed", "result": {"title": "Example Domain"}, "resultText": "Returned the title.", "output": schema, "errorCode": None, "steps": []}
 
     def answer(request: httpx.Request) -> httpx.Response:

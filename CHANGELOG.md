@@ -3,6 +3,12 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
+## Unreleased
+
+The Claude 5.5 models: `claude-opus-5-5` (the default), `claude-sonnet-5-5` and `claude-haiku-5-5` replace Claude Opus 5,
+Sonnet 5 and Haiku 4.5 on the API (the old ids are refused). An agent model's `computerTool` is now
+`"computer_toolset_20260801"` for Claude (the only computer-use tool these models take) or `"computer"` for OpenAI.
+
 ## 3.1.0 (2026-10-09)
 
 Every run reads as a clear story: what the agent saw, thought and did, what came out, and what it cost. All additions;

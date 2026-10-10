@@ -425,9 +425,9 @@ def test_exec_stream_and_scripts() -> None:
     assert proc.result is not None and proc.result["exitCode"] == 3 and proc.result["truncated"] is True
     assert proc.wait()["exitCode"] == 3  # already consumed: returns the result
     assert f.body(0)["stream"] is True
-    script = bx.sessions.run_script(SESSION_ID, "console.log(1)", ai={"model": "claude-haiku-4-5"})
+    script = bx.sessions.run_script(SESSION_ID, "console.log(1)", ai={"model": "claude-haiku-5-5"})
     assert script.wait()["exitCode"] == 3
-    assert f.body(1)["ai"] == {"model": "claude-haiku-4-5"}
+    assert f.body(1)["ai"] == {"model": "claude-haiku-5-5"}
 
 
 def test_exec_stream_skips_keepalives_and_raises_an_error_line() -> None:
