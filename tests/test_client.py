@@ -49,7 +49,7 @@ def test_headers_api_key_version_and_json_only_with_a_body() -> None:
     bx.profiles.update("prof_1", name="n")
     get, patch = f.requests
     assert get.headers["x-api-key"] == "bxl_test"
-    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/3.1.0"
+    assert get.headers["boxline-sdk"] == f"python/{boxline.__version__}" == "python/3.1.1"
     assert "content-type" not in get.headers
     assert get.url.path == "/healthz"
     assert patch.headers["content-type"] == "application/json"
@@ -534,7 +534,7 @@ def test_async_retries_keys_and_errors(no_sleep: List[float]) -> None:
             assert isinstance(s, boxline.AsyncSession) and s.id == SESSION_ID
             keys = {r.headers["idempotency-key"] for r in f.requests}
             assert len(f.requests) == 3 and len(keys) == 1
-            assert f.requests[0].headers["boxline-sdk"] == "python/3.1.0"
+            assert f.requests[0].headers["boxline-sdk"] == "python/3.1.1"
         g = Fake(api_error(404, "not_found", {"x-client-request-id": "c1"}, "req_1"))
         with pytest.raises(boxline.NotFoundError) as e:
             await g.async_().sessions.get("x", options={"client_request_id": "c1"})
