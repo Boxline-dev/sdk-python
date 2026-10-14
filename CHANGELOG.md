@@ -3,6 +3,15 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
+## Unreleased
+
+### Fixed
+
+- `Plan.maxCrawlPages` and `ApiKey.createdBy` (`ApiKeyCreator`), which the API already returns.
+- Docstrings: `crawl.start`'s `max_pages` goes up to the plan's `maxCrawlPages` (1000 on paid plans); `login`'s default
+  `url` is the first site without `*.` and it needs `agentRuns` too; `FileEntry` `"symlink"` comes only from a stopped
+  session.
+
 ## 3.1.1 (2026-10-10)
 
 The Claude 5.5 models: `claude-opus-5-5` (the default), `claude-sonnet-5-5` and `claude-haiku-5-5` replace Claude Opus 5,

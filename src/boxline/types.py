@@ -109,6 +109,8 @@ class Plan(TypedDict):
     webhookEndpoints: NotRequired[Optional[int]]
     #: Days an ended session's recording, logs and agent-run steps are kept (then deleted; the session stays).
     retentionDays: NotRequired[int]
+    #: The most pages one crawl may ask for (Free 200, paid plans 1000).
+    maxCrawlPages: NotRequired[int]
     #: Tasks a project may have; None = no plan limit (1,000 per project at most).
     tasks: NotRequired[Optional[int]]
     #: Tasks with a schedule switched on; 0 = no schedules, None = no limit.
@@ -192,12 +194,22 @@ class Me(TypedDict):
     project: MeProject
 
 
+class ApiKeyCreator(TypedDict):
+    #: ``"console"``, ``"api_key"`` or ``"support"`` (the platform's staff acting as a user, never named).
+    via: str
+    userId: Optional[str]
+    email: Optional[str]
+    apiKeyId: Optional[str]
+
+
 class ApiKey(TypedDict):
     id: str
     name: str
     prefix: str
     createdAt: str
     lastUsedAt: Optional[str]
+    #: Who made it (in a list); None for keys made before it was recorded.
+    createdBy: NotRequired[Optional[ApiKeyCreator]]
 
 
 class NewApiKey(TypedDict):
@@ -480,7 +492,8 @@ class ExecExit(TypedDict, total=False):
 
 class FileEntry(TypedDict):
     name: str
-    #: ``"symlink"``: a link, never followed (it is not downloadable).
+    #: A running session's listing follows links (a link shows as what it points to); ``"symlink"`` comes only from a
+    #: stopped session's saved workspace, where a link is never followed (and not downloadable).
     type: Literal["file", "dir", "symlink", "other"]
     size: int
     mtime: str

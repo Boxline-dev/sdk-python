@@ -1185,14 +1185,15 @@ class Session:
         options: Optional[RequestOptions] = None,
     ) -> t.LoginValue:
         """Signs the browser in with a password credential in one call (default: the one the session's profile links;
-        ``url`` is the sign-in page, on one of the credential's sites, default the first). A short agent run does it (at
+        ``url`` is the sign-in page, on one of the credential's sites, default the first site without ``*.``; 400 when every
+        site is a wildcard). A short agent run does it (at
         most 15 steps, browser tools only, only that credential and its sites; the project's default model, counted like
         an agent run), and a credential with ``code_source`` "push" or "url" waits for its code or sign-in link, which the
         run never sees. Returns the page it ends on (no query or fragment) and the run's id. Raises
         CredentialLoginFailedError (its ``run_id`` is the run; CredentialLoginTimeoutError when it ran out of time and was
         canceled), CredentialCodeTimeoutError (no code in time) or
-        CredentialLinkWrongSiteError; needs the plan's ``loginDetails`` (FeatureNotInPlanError) and a session with a
-        browser. It runs alone as one action."""
+        CredentialLinkWrongSiteError; needs the plan's ``loginDetails`` and ``agentRuns`` (FeatureNotInPlanError) and a
+        session with a browser, and counts against the agent-run rate limit. It runs alone as one action."""
         r = (self.actions(clean({"action": "login", "credential": credential, "url": url, "allowWithExtensions": allow_with_extensions}), options=options))[0]
         if r.get("ok"):
             return r.get("value")
@@ -1739,7 +1740,8 @@ class Crawl:
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.CrawlJob:
-        """Starts a crawl (an Idempotency-Key is sent, so a retry never starts a second one)."""
+        """Starts a crawl (an Idempotency-Key is sent, so a retry never starts a second one). ``max_pages``: default 20,
+        up to the plan's ``maxCrawlPages`` (Free 200, paid plans 1000); PlanLimitError (402) beyond."""
         body = clean({"url": url, "maxPages": max_pages, "maxDepth": max_depth, "sameHost": same_host, "include": as_list(include), "exclude": as_list(exclude),
                       "format": format, "waitUntil": wait_until, "delayMs": delay_ms, "timeoutMs": timeout_ms, "proxy": proxy, "browser": browser, "blockAds": block_ads})
         return self._c._json("POST", "/v1/crawls", json=body, options=options)
