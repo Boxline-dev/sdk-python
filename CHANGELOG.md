@@ -3,11 +3,16 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
-## Unreleased
+## 3.2.0 (2026-10-14)
+
+Types for what the API already returns. Additions only; nothing breaks.
+
+### Added
+
+- `Plan.maxCrawlPages` and `ApiKey.createdBy` (`ApiKeyCreator`), which the API already returns.
 
 ### Fixed
 
-- `Plan.maxCrawlPages` and `ApiKey.createdBy` (`ApiKeyCreator`), which the API already returns.
 - Docstrings: `crawl.start`'s `max_pages` goes up to the plan's `maxCrawlPages` (1000 on paid plans); `login`'s default
   `url` is the first site without `*.` and it needs `agentRuns` too; `FileEntry` `"symlink"` comes only from a stopped
   session.
