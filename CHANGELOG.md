@@ -3,6 +3,14 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
+## Unreleased
+
+### Added
+
+- Claude prompt caching on your own Anthropic key: `project.set_model_key("anthropic", prompt_caching="5m" | "1h" | "off")`
+  (`ModelKey["promptCaching"]`). Agent runs on your own key then send `cache_control`, and `AgentRun["promptCache"]`,
+  `usage["cacheReadTokens"]` / `["cacheWriteTokens"]` (on runs and steps) report the cached tokens, which `costUsd` prices.
+
 ## 3.2.0 (2026-10-14)
 
 Types for what the API already returns. Additions only; nothing breaks.

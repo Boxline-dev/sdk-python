@@ -460,12 +460,14 @@ class Project:
         key: Optional[str] = None,
         use: Optional[t.KeySource] = None,
         *,
+        prompt_caching: Optional[Literal["off", "5m", "1h"]] = None,
         options: Optional[RequestOptions] = None,
     ) -> t.ModelKey:
         """Saves a provider key and/or the choice of whose key calls use (``use="project"`` needs a saved key,
         ``use="platform"`` a plan with ``platformModels``: 402 otherwise). The provider checks the key first (400
-        ``invalid_model_key``). Runs on your own key have no model charge from Boxline."""
-        return self._c._json("PUT", f"/v1/project/model-keys/{provider}", json=clean({"key": key, "use": use}), options=options)
+        ``invalid_model_key``). Runs on your own key have no model charge from Boxline. ``prompt_caching`` (anthropic only):
+        Claude prompt caching for agent runs on your own key, "off", "5m" or "1h" (the cache's lifetime)."""
+        return self._c._json("PUT", f"/v1/project/model-keys/{provider}", json=clean({"key": key, "use": use, "promptCaching": prompt_caching}), options=options)
 
     def delete_model_key(self, provider: t.Provider, *, options: Optional[RequestOptions] = None) -> None:
         """Deletes the provider's key; calls go back to the platform's key where the plan includes it."""

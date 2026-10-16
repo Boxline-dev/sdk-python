@@ -159,6 +159,8 @@ class ModelKey(TypedDict):
     lastUsedAt: Optional[str]
     #: The platform can make calls for this provider for this project (a server key exists and the plan includes it).
     platformAvailable: bool
+    #: anthropic: Claude prompt caching for agent runs on the project's own key ("off" by default); None for the others.
+    promptCaching: NotRequired[Optional[Literal["off", "5m", "1h"]]]
 
 
 class ModelKeys(TypedDict):
@@ -973,6 +975,10 @@ class StepUsage(TypedDict):
 
     inputTokens: int
     outputTokens: int
+    #: With prompt caching: input tokens read from the cache (not in inputTokens).
+    cacheReadTokens: NotRequired[int]
+    #: With prompt caching: input tokens written to the cache (not in inputTokens).
+    cacheWriteTokens: NotRequired[int]
     #: None for a model that is not priced.
     costUsd: Optional[float]
 
@@ -1021,8 +1027,13 @@ class AgentStep(TypedDict):
 
 
 class AgentUsage(TypedDict):
+    #: Input tokens not read from or written to the prompt cache.
     inputTokens: int
     outputTokens: int
+    #: With prompt caching: input tokens read from the cache.
+    cacheReadTokens: NotRequired[int]
+    #: With prompt caching: input tokens written to the cache.
+    cacheWriteTokens: NotRequired[int]
     costUsd: Optional[float]
 
 
@@ -1042,6 +1053,8 @@ class AgentRun(TypedDict):
     model: str
     #: Whose key pays for the run's model calls: "project" is the project's own key (no model charge from Boxline).
     keySource: KeySource
+    #: Claude prompt caching the run used ("5m" or "1h": the project's own key with promptCaching on), or None.
+    promptCache: NotRequired[Optional[Literal["5m", "1h"]]]
     mode: NotRequired[AgentMode]
     #: Its limits: steps (None: none), model cost in USD (None: none), tool errors in a row.
     maxSteps: NotRequired[Optional[int]]
