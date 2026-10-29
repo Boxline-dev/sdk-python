@@ -80,6 +80,8 @@ class ErrorCode:
     RUN_NOT_LIVE = "run_not_live"
     #: 400: ``project.set_model_key`` when the provider does not accept the key (nothing is saved).
     INVALID_MODEL_KEY = "invalid_model_key"
+    #: 400: ``agent.resume`` on a run that brought its own key (keySource "run") without ``model_key`` (it is never stored).
+    MODEL_KEY_REQUIRED = "model_key_required"
     #: 400: a call on the project's own model key was refused by the provider (a run ends with this error code); never falls back to Boxline's key.
     MODEL_KEY_REJECTED = "model_key_rejected"
     #: 502: another failure of a call on the project's own model key (the provider's text, key scrubbed).

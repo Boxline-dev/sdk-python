@@ -10,10 +10,13 @@ SessionStatus = Literal["RUNNING", "STOPPED", "DELETED", "ERROR"]
 CaptchaMode = Literal["ask", "ignore", "solve"]
 CaptchaKind = Literal["recaptcha", "hcaptcha", "turnstile", "cloudflare", "datadome", "arkose", "human"]
 WaitUntil = Literal["load", "domcontentloaded", "networkidle", "commit"]
-#: Model providers: Anthropic Claude, OpenAI, Grok (xAI) and Google Gemini (Grok and Gemini have no computer use).
-Provider = Literal["anthropic", "openai", "xai", "google"]
+#: Model providers: Anthropic Claude, OpenAI, Grok (xAI), Google Gemini and OpenRouter (your own key only, any of its
+#: model ids such as "anthropic/claude-sonnet-4.5"). Grok, Gemini and OpenRouter have no computer use.
+Provider = Literal["anthropic", "openai", "xai", "google", "openrouter"]
 #: Whose key a model call uses: the project's own ("project": no model charge from Boxline) or the platform's.
 KeySource = Literal["project", "platform"]
+#: Whose key paid for a run's or call's model calls: also "run", a key sent with the request (``model_key``; no model charge).
+CallKeySource = Literal["project", "platform", "run"]
 
 
 class Viewport(TypedDict):
@@ -761,7 +764,7 @@ class ExtractResult(TypedDict):
     data: Any
     provider: Provider
     model: str
-    keySource: KeySource
+    keySource: CallKeySource
     usage: ModelUsage
     pages: List[ExtractPage]
     ms: int
@@ -858,6 +861,8 @@ class ProviderInfo(TypedDict):
     #: Whose key a call would use now; None when there is none.
     keySource: Optional[KeySource]
     reason: Optional[str]
+    #: Any model id of the provider's own catalog may be sent (OpenRouter: ``models`` is empty and a run names its ``model``).
+    anyModel: NotRequired[bool]
     models: List[ModelInfo]
 
 
@@ -924,8 +929,8 @@ class AgentRunStarted(TypedDict):
     sessionExpiresAt: NotRequired[Optional[str]]
     provider: Provider
     model: str
-    #: Whose key pays for the run's model calls: "project" is the project's own key (no model charge from Boxline).
-    keySource: KeySource
+    #: Whose key pays for the run's model calls: "project" (the project's own key) or "run" (``model_key``): no model charge from Boxline.
+    keySource: CallKeySource
     mode: NotRequired[AgentMode]
 
 
@@ -1051,8 +1056,8 @@ class AgentRun(TypedDict):
     sessionExpiresAt: NotRequired[Optional[str]]
     provider: Provider
     model: str
-    #: Whose key pays for the run's model calls: "project" is the project's own key (no model charge from Boxline).
-    keySource: KeySource
+    #: Whose key pays for the run's model calls: "project" (the project's own key) or "run" (``model_key``): no model charge from Boxline.
+    keySource: CallKeySource
     #: Claude prompt caching the run used ("5m" or "1h": the project's own key with promptCaching on), or None.
     promptCache: NotRequired[Optional[Literal["5m", "1h"]]]
     mode: NotRequired[AgentMode]

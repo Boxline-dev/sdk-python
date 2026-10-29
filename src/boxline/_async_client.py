@@ -340,13 +340,16 @@ class AsyncBoxline:
         proxy: Optional[Proxy] = None,
         browser: Optional[Union[bool, JSON]] = None,
         block_ads: Optional[bool] = None,
+        model_key: Optional[str] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.ExtractResult:
         """Structured data from pages: rendered in a real browser, then a model fills ``schema`` (JSON Schema) and/or
-        follows ``prompt``. Returns ``{"data", "pages", "provider", "model", "usage", "ms"}``."""
+        follows ``prompt``. Returns ``{"data", "pages", "provider", "model", "usage", "ms"}``. ``model_key``: an API key
+        of the provider for this call only (``keySource`` "run"), never stored by Boxline."""
         body = clean({"url": url, "urls": as_list(urls), "prompt": prompt, "schema": schema, "provider": provider, "model": model,
-                      "waitUntil": wait_until, "delayMs": delay_ms, "timeoutMs": timeout_ms, "proxy": proxy, "browser": browser, "blockAds": block_ads})
+                      "waitUntil": wait_until, "delayMs": delay_ms, "timeoutMs": timeout_ms, "proxy": proxy, "browser": browser, "blockAds": block_ads,
+                      "modelKey": model_key})
         return await self._json("POST", "/v1/extract", json=body, options=options)
 
     async def search(
@@ -1129,6 +1132,7 @@ class AsyncSession:
         model: Optional[str] = None,
         credentials: Optional[Sequence[str]] = None,
         allow_with_extensions: Optional[bool] = None,
+        model_key: Optional[str] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.StepResult:
@@ -1139,13 +1143,14 @@ class AsyncSession:
         ``%NAME.username%``, ``%NAME.password%`` and ``%NAME.otp%`` for a password, each only on its own sites and in the
         shell only with ``shell: True``; the result never shows their values. In a session whose profile links a
         password credential, that credential is offered too. In a session with Chrome extensions, credentials need
-        ``allow_with_extensions=True`` (VariablesWithExtensionsError otherwise)."""
-        body = {"action": "step", "instruction": instruction, "variables": variables, "provider": provider, "model": model, "credentials": as_list(credentials), "allowWithExtensions": allow_with_extensions}
+        ``allow_with_extensions=True`` (VariablesWithExtensionsError otherwise). ``model_key``: an API key of the provider for
+        this step only, never stored by Boxline."""
+        body = {"action": "step", "instruction": instruction, "variables": variables, "provider": provider, "model": model, "credentials": as_list(credentials), "allowWithExtensions": allow_with_extensions, "modelKey": model_key}
         return await self._one(clean(body), options)
 
-    async def extract(self, instruction: str, schema: Optional[JSON] = None, provider: Optional[str] = None, model: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.ExtractValue:
+    async def extract(self, instruction: str, schema: Optional[JSON] = None, provider: Optional[str] = None, model: Optional[str] = None, model_key: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.ExtractValue:
         """Structured data from the current page: ``{"data", "model", "usage"}``."""
-        return await self._one(clean({"action": "extract", "instruction": instruction, "schema": schema, "provider": provider, "model": model}), options)
+        return await self._one(clean({"action": "extract", "instruction": instruction, "schema": schema, "provider": provider, "model": model, "modelKey": model_key}), options)
 
     async def goto(self, url: str, wait_until: Optional[str] = None, *, options: Optional[RequestOptions] = None) -> t.GotoResult:
         return await self._one(clean({"action": "goto", "url": url, "waitUntil": wait_until}), options)
@@ -2156,6 +2161,8 @@ class AsyncAgent:
         credentials: Optional[Sequence[str]] = None,
         max_cost_usd: Optional[float] = None,
         max_consecutive_errors: Optional[int] = None,
+        model_key: Optional[str] = None,
+        prompt_caching: Optional[str] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.AgentRunStarted:
@@ -2209,7 +2216,14 @@ class AsyncAgent:
         each model call; default none), ``max_consecutive_errors`` (tool errors in a row, 1-20, default 5), and the same
         call with the same result 5 times. At one of these the run ends with ``errorCode`` ``max_steps``, ``max_cost``,
         ``too_many_errors`` or ``no_progress``, ``resultText`` says what is done and what is left, and ``resumable``
-        says until when ``resume`` can carry it on (its own session is kept that long)."""
+        says until when ``resume`` can carry it on (its own session is kept that long).
+
+        ``model_key``: an API key of the run's provider for this run only (``keySource`` "run"): held in memory while the
+        run works, never stored by Boxline, no model charge from Boxline, on every plan. Its provider is ``provider``, else
+        the one whose catalog lists ``model``. ``resume`` needs it again. ``provider="openrouter"`` takes any OpenRouter
+        model id as ``model`` (e.g. "anthropic/claude-sonnet-4.5"); its ``costUsd`` is what OpenRouter reports.
+        ``prompt_caching`` ("off", "5m", "1h"): Claude prompt caching for this run, with your own Anthropic key only
+        (``model_key`` or the project's own key); default: the project key's setting, "off" with ``model_key``."""
         body = clean(
             {
                 "task": task,
@@ -2226,6 +2240,8 @@ class AsyncAgent:
                 "credentials": as_list(credentials),
                 "maxCostUsd": max_cost_usd,
                 "maxConsecutiveErrors": max_consecutive_errors,
+                "modelKey": model_key,
+                "promptCaching": prompt_caching,
             }
         )
         if max_steps is not NOT_GIVEN:
@@ -2253,6 +2269,7 @@ class AsyncAgent:
         max_steps: Any = NOT_GIVEN,
         max_cost_usd: Any = NOT_GIVEN,
         variables: Optional[Dict[str, Union[str, Dict[str, str]]]] = None,
+        model_key: Optional[str] = None,
         *,
         options: Optional[RequestOptions] = None,
     ) -> t.AgentRun:
@@ -2266,14 +2283,15 @@ class AsyncAgent:
           ``max_steps`` (1-1000; ``None`` means no step limit; default: the run's own), ``max_cost_usd`` (the model cost
           this stretch may add; default: the run's own; ``None``: none), ``note`` (an extra note for the model) and
           ``variables`` (the run's variables again: their values are never stored; every name, as text or
-          ``{"value": ...}``; MissingVariablesError when one is missing). A stopped session is resumed first.
+          ``{"value": ...}``; MissingVariablesError when one is missing), and ``model_key`` (a run that brought its own key
+          needs it again: it is never stored). A stopped session is resumed first.
 
         NotResumableError when the run is neither (it is running, completed, canceled, failed for another reason, or its
         window passed), RunNotLiveError when its server stopped. An Idempotency-Key is sent, so a retry never resumes it
         twice::
 
             run = await bx.agent.resume(run["id"], max_steps=30, note="The CSV is downloaded already")"""
-        body: Dict[str, Any] = clean({"note": note, "variables": variables})
+        body: Dict[str, Any] = clean({"note": note, "variables": variables, "modelKey": model_key})
         if max_steps is not NOT_GIVEN:
             body["maxSteps"] = max_steps
         if max_cost_usd is not NOT_GIVEN:
