@@ -3,7 +3,9 @@
 All notable changes to `boxline-sdk`, the Python SDK (imported as `boxline`). It follows
 [semantic versioning](https://semver.org).
 
-## Unreleased
+## 3.3.0 (2026-10-29)
+
+A key for one run, OpenRouter as a fifth provider, and Claude prompt caching on your own Anthropic key. Additions only; nothing breaks.
 
 ### Added
 
